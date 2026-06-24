@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Message Generation Workflow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="workflow-container">
+    <!-- Left Panel – Configuration -->
+    <div class="left-panel glass-panel">
+      <h2 class="panel-title">Message Settings</h2>
+
+      <label class="form-label" for="occasionSelect">Occasion</label>
+      <select class="select-control" id="occasionSelect">
+        <option value="Birthday">Birthday</option>
+        <option value="Anniversary">Anniversary</option>
+        <option value="Holiday">Holiday</option>
+      </select>
+
+      <label class="form-label" for="toneSelect">Tone</label>
+      <select class="select-control" id="toneSelect">
+        <option value="Formal">Formal</option>
+        <option value="Casual">Casual</option>
+        <option value="Friendly">Friendly</option>
+      </select>
+
+      <label class="form-label" for="nameInput">Recipient Name</label>
+      <input class="form-control" type="text" id="nameInput" placeholder="Jane Doe">
+
+      <label class="form-label" for="relInput">Relationship</label>
+      <input class="form-control" type="text" id="relInput" placeholder="Friend">
+
+      <label class="form-label" for="contextInput">Message Context</label>
+      <textarea class="textarea-prompt" id="contextInput" rows="4" placeholder="Add any extra details…"></textarea>
+
+      <button class="btn-primary mt-4 w-full" onclick="generateMessage()">Generate</button>
+    </div>
+
+    <!-- Right Panel – Output Workspace -->
+    <div class="right-panel output-workspace">
+      <div class="toolbar">
+        <button class="btn-action" onclick="copyOutput()"><i data-lucide="copy"></i></button>
+        <button class="btn-action" onclick="regenerateMessage()"><i data-lucide="rotate-cw"></i></button>
+        <button class="btn-action" onclick="saveMessage()"><i data-lucide="save"></i></button>
+      </div>
+
+      <div id="outputCard" class="output-card glass-card">
+        <div class="loading-placeholder">
+          <div class="shimmer"></div>
+          <div class="shimmer w-3/4"></div>
+          <div class="shimmer w-1/2"></div>
+        </div>
+        <p id="generatedMessage" class="output-text hidden"></p>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

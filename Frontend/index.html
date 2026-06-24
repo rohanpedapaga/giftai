@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GiftAI — Premium AI Personalized Message Generator</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <!-- Premium Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=1.0.6">
+
+    <!-- UMD React CDNs -->
+    <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- HTM (Hyperscript Tagged Markup) for UMD (JSX alternate) -->
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+
+    <!-- UMD React Router CDNs -->
+    <script src="https://unpkg.com/@remix-run/router@1.16.1/dist/router.umd.min.js"></script>
+    <script src="https://unpkg.com/react-router@6.23.1/dist/umd/react-router.production.min.js"></script>
+    <script src="https://unpkg.com/react-router-dom@6.23.1/dist/umd/react-router-dom.production.min.js"></script>
+
+    <!-- UMD Framer Motion CDN -->
+    <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+
+    <!-- PropTypes and Recharts UMD CDNs -->
+    <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+
+    <!-- Lucide Icons & Chart.js -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            var debugDiv = document.createElement('div');
+            debugDiv.style.position = 'fixed';
+            debugDiv.style.top = '0';
+            debugDiv.style.left = '0';
+            debugDiv.style.width = '100vw';
+            debugDiv.style.height = '100vh';
+            debugDiv.style.backgroundColor = '#0b0f19';
+            debugDiv.style.color = '#ef4444';
+            debugDiv.style.padding = '2rem';
+            debugDiv.style.fontFamily = 'monospace';
+            debugDiv.style.zIndex = '999999';
+            debugDiv.style.overflow = 'auto';
+            debugDiv.innerHTML = '<h1 style="color: #ef4444; font-size: 1.5rem; margin-bottom: 1rem;">Frontend Javascript Crash</h1>' +
+                                  '<p><b>Error:</b> ' + message + '</p>' +
+                                  '<p><b>File:</b> ' + source + ' (Line: ' + lineno + ', Col: ' + colno + ')</p>' +
+                                  '<pre style="margin-top: 1rem; color: #94a3b8; background: #0f172a; padding: 1rem; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">' + (error && error.stack || '') + '</pre>';
+            document.body.appendChild(debugDiv);
+        };
+    </script>
+</head>
+<body>
+    <div id="root">
+        <!-- Initial Loader Shimmer -->
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #0b0f19; color: #f8fafc; font-family: 'Outfit', sans-serif;">
+            <div style="margin-bottom: 20px; font-size: 2rem; font-weight: 800; letter-spacing: -0.02em;">Gift<span style="color: #6366f1;">AI</span></div>
+            <div style="width: 40px; height: 40px; border: 3px solid rgba(99, 102, 241, 0.2); border-top: 3px solid #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        </div>
+    </div>
+
+    <style>
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+
+    <!-- Main React SPA Entry Point -->
+    <script src="script.js?v=1.0.6"></script>
+</body>
+</html>
