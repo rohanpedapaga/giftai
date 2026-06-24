@@ -372,7 +372,6 @@ function AuthProvider({ children }) {
         <//>
     `;
 }
-}
 
 // ============================================================
 // ROUTE PROTECTION WRAPPER
@@ -1012,7 +1011,8 @@ function Toast({ toast, setToast }) {
                     </div>
                 </${motion.div}>
             `}
-`;
+        <//>
+    `;
 }
 class ErrorBoundary extends React.Component {
     constructor(props) {
