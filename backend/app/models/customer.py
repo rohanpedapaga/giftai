@@ -11,6 +11,8 @@ class Customer(db.Model):
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(150), unique=True, nullable=False)
     phone = db.Column(db.String(20), nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+    password_reset_required = db.Column(db.Boolean, default=False, server_default='0', nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -27,5 +29,6 @@ class Customer(db.Model):
             "name": self.name,
             "email": self.email,
             "phone": self.phone,
+            "password_reset_required": self.password_reset_required,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }

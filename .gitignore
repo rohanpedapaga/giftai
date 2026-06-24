@@ -1,0 +1,38 @@
+# Python build/cache artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual Environment
+backend/venv/
+venv/
+ENV/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Application Configuration & Secrets
+backend/.env
+.env
+migration_passwords.md
+user_passwords.json
+backend/database/database.db
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

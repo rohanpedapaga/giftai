@@ -19,7 +19,7 @@ if __name__ == '__main__':
     
     # Run the server
     # Set debug to True for development mode, False for production
-    debug_mode = os.getenv('FLASK_DEBUG', 'True').lower() in ['true', '1', 't']
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() in ['true', '1', 't']
     
     print(f"Starting server on http://localhost:{port} with debug={debug_mode}")
     app.run(host='0.0.0.0', port=port, debug=debug_mode)

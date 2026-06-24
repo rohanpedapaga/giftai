@@ -8,6 +8,15 @@ class Config:
     # Secret Key for signing cookies and sessions
     SECRET_KEY = os.getenv('SECRET_KEY', 'default-paperplane-key-1234')
 
+    # Administrator Account Credentials
+    ADMIN_EMAIL = os.getenv('ADMIN_EMAIL', 'admin@giftai.com')
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
+
+    # Rate Limiting Configuration
+    LIMIT_AI_GENERATION = os.getenv('LIMIT_AI_GENERATION', '10 per minute')
+    LIMIT_AUTH = os.getenv('LIMIT_AUTH', '10 per 5 minutes')
+    LIMIT_ADMIN = os.getenv('LIMIT_ADMIN', '30 per minute')
+
     # Database Configuration
     DB_USER = os.getenv('DB_USER', 'root')
     DB_PASSWORD = os.getenv('DB_PASSWORD', '')

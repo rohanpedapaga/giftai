@@ -8,28 +8,38 @@ from datetime import datetime, date, time
 
 dashboard_bp = Blueprint('dashboard_routes', __name__)
 
+from app.utils.auth_helper import token_required
+from flask import g
+
 @dashboard_bp.route('/dashboard/stats', methods=['GET'])
 @dashboard_bp.route('/dashboard', methods=['GET']) # Root level alias compatibility
+@token_required
 def get_dashboard_statistics():
     """
     GET /api/dashboard/stats
     GET /api/dashboard
-    Returns summary statistics for the admin dashboard.
+    Returns summary statistics for the dashboard.
     """
     try:
+        # Determine query filters based on role
+        if g.role == 'admin':
+            msg_filter = True
+        else:
+            msg_filter = (Message.customer_id == g.user_id)
+
         # 1. Total messages count
-        total_messages = Message.query.count()
+        total_messages = Message.query.filter(msg_filter).count()
         
         # 2. Today's message volume
         today_start = datetime.combine(date.today(), time.min)
-        messages_today = Message.query.filter(Message.created_at >= today_start).count()
+        messages_today = Message.query.filter(msg_filter, Message.created_at >= today_start).count()
         
         # 3. Occasions breakdown counts
         # Join Message and Occasion to get names rather than raw IDs
         occasion_query = db.session.query(
             Occasion.name, 
             db.func.count(Message.id)
-        ).join(Message, Message.occasion_id == Occasion.id).group_by(Occasion.name).all()
+        ).join(Message, Message.occasion_id == Occasion.id).filter(msg_filter).group_by(Occasion.name).all()
         
         messages_by_occasion = [{"occasion": item[0], "count": item[1]} for item in occasion_query]
         
@@ -37,7 +47,7 @@ def get_dashboard_statistics():
         tone_query = db.session.query(
             Tone.name, 
             db.func.count(Message.id)
-        ).join(Message, Message.tone_id == Tone.id).group_by(Tone.name).all()
+        ).join(Message, Message.tone_id == Tone.id).filter(msg_filter).group_by(Tone.name).all()
         
         messages_by_tone = [{"tone": item[0], "count": item[1]} for item in tone_query]
         
@@ -45,7 +55,7 @@ def get_dashboard_statistics():
         status_query = db.session.query(
             Message.status,
             db.func.count(Message.id)
-        ).group_by(Message.status).all()
+        ).filter(msg_filter).group_by(Message.status).all()
         
         # Format status counts into dictionary and handle defaults for missing status options
         status_counts = {

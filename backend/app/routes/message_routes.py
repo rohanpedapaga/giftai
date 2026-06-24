@@ -22,9 +22,19 @@ message_bp = Blueprint('message_routes', __name__)
 # CREATE / GENERATE ENDPOINTS
 # ============================================================
 
+from app.utils.auth_helper import token_required
+from flask import g, current_app
+from app import limiter
+from flask_limiter.util import get_remote_address
+
+def get_generation_limit():
+    return current_app.config.get('LIMIT_AI_GENERATION', '10 per minute')
+
 @message_bp.route('/messages/generate', methods=['POST'])
 @message_bp.route('/messages/create', methods=['POST'])
 @message_bp.route('/create', methods=['POST']) # Root level alias compatibility
+@token_required
+@limiter.limit(get_generation_limit, key_func=lambda: f"user_{g.user_id}" if getattr(g, 'user_id', None) else get_remote_address())
 def generate_greeting():
     """
     POST /api/messages/generate
@@ -40,9 +50,14 @@ def generate_greeting():
         if validation_error:
             return error_response(validation_error, 400)
             
+        # IDOR protection: force standard users to generate for themselves
+        customer_id = int(data['customer_id'])
+        if g.role != 'admin':
+            customer_id = g.user_id
+            
         # 2. Run generation service
         message, debug_info = generate_and_save_message(
-            customer_id=data['customer_id'],
+            customer_id=customer_id,
             recipient_id=data['recipient_id'],
             occasion_id=data['occasion_id'],
             tone_id=data['tone_id'],
@@ -52,7 +67,6 @@ def generate_greeting():
         
         response_data = message.to_dict()
         return success_response(response_data, 201, extra={"extra": {"ai_debug": debug_info}})
-
         
     except AIGenerationError as age:
         is_quota = "quota" in str(age).lower()
@@ -189,12 +203,15 @@ def health_check():
         }), http_code
 
 @message_bp.route('/diagnostics', methods=['GET'])
+@token_required
 def get_diagnostics():
     """
     GET /api/diagnostics
     Returns detailed diagnostics: Active key prefix, Active model name,
-    SDK version, Endpoint URL, and Raw provider response.
+    SDK version, Endpoint URL, and Raw provider response. (Admin only)
     """
+    if g.role != 'admin':
+        return error_response("Access denied. Admin privileges required.", 403)
     from flask import current_app, jsonify
     import requests
     
@@ -249,6 +266,7 @@ def get_diagnostics():
 @message_bp.route('/messages', methods=['GET'])
 @message_bp.route('/messages/list', methods=['GET'])
 @message_bp.route('/list', methods=['GET']) # Root level alias compatibility
+@token_required
 def list_messages():
     """
     GET /api/messages
@@ -265,7 +283,12 @@ def list_messages():
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
         
-        customer_id = int(customer_id_str) if customer_id_str else None
+        # IDOR prevention: non-admins can only list their own messages
+        if g.role != 'admin':
+            customer_id = g.user_id
+        else:
+            customer_id = int(customer_id_str) if customer_id_str else None
+            
         occasion_id = int(occasion_id_str) if occasion_id_str else None
         
         messages, total = get_messages(
@@ -292,6 +315,7 @@ def list_messages():
 @message_bp.route('/messages/<int:message_id>', methods=['GET'])
 @message_bp.route('/messages/detail/<int:message_id>', methods=['GET'])
 @message_bp.route('/detail/<int:message_id>', methods=['GET']) # Root level alias compatibility
+@token_required
 def detail_message(message_id):
     """
     GET /api/messages/:id
@@ -303,6 +327,10 @@ def detail_message(message_id):
         message = get_message_detail(message_id)
         if not message:
             return error_response("Message not found", 404)
+            
+        # IDOR prevention: non-admins can only view their own messages
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot view other customers' messages.", 403)
             
         # Pull version logs as well
         versions = get_message_versions(message_id)
@@ -319,12 +347,22 @@ def detail_message(message_id):
 # ============================================================
 
 @message_bp.route('/messages/<int:message_id>', methods=['PUT'])
+@token_required
 def edit_existing_message(message_id):
     """
     PUT /api/messages/:id
     Edits a message and creates a version log entry.
     """
     try:
+        from app.models import Message
+        message = Message.query.get(message_id)
+        if not message:
+            return error_response("Message not found", 404)
+            
+        # IDOR prevention
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot edit other customers' messages.", 403)
+
         data = request.get_json()
         
         validation_error = validate_message_edit(data)
@@ -346,12 +384,22 @@ def edit_existing_message(message_id):
         return error_response(f"An unexpected error occurred: {str(e)}", 500)
 
 @message_bp.route('/messages/<int:message_id>/save', methods=['POST'])
+@token_required
 def save_generated_message(message_id):
     """
     POST /api/messages/:id/save
     Saves a generated message by changing its status to 'saved'.
     """
     try:
+        from app.models import Message
+        message = Message.query.get(message_id)
+        if not message:
+            return error_response("Message not found", 404)
+            
+        # IDOR prevention
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot save other customers' messages.", 403)
+
         message = save_message(message_id)
         return success_response(message.to_dict(), 200)
     except ValueError as ve:
@@ -366,6 +414,7 @@ def save_generated_message(message_id):
 @message_bp.route('/messages/process', methods=['POST'])
 @message_bp.route('/messages/<int:message_id>/process', methods=['POST'])
 @message_bp.route('/process', methods=['POST']) # Root level alias compatibility
+@token_required
 def process_message(message_id=None):
     """
     POST /api/messages/process
@@ -381,6 +430,15 @@ def process_message(message_id=None):
         if not final_message_id:
             return error_response("message_id is a required field", 400)
             
+        from app.models import Message
+        message = Message.query.get(final_message_id)
+        if not message:
+            return error_response("Message not found", 404)
+            
+        # IDOR prevention
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot process other customers' messages.", 403)
+
         new_status = data.get('status')
         if not new_status:
             return error_response("status is a required field", 400)
@@ -407,12 +465,22 @@ def process_message(message_id=None):
 # ============================================================
 
 @message_bp.route('/messages/<int:message_id>/versions', methods=['GET'])
+@token_required
 def list_versions(message_id):
     """
     GET /api/messages/:id/versions
     Retrieves version history for a message.
     """
     try:
+        from app.models import Message
+        message = Message.query.get(message_id)
+        if not message:
+            return error_response("Message not found", 404)
+            
+        # IDOR prevention
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot view other customers' message versions.", 403)
+
         versions = get_message_versions(message_id)
         return success_response([v.to_dict() for v in versions])
     except ValueError as ve:

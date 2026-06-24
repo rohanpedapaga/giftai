@@ -25,75 +25,123 @@ const html = window.htm.bind(React.createElement);
 
 // API Service Layer
 const API_BASE = 'http://localhost:5000/api';
+
+const request = async (url, options = {}) => {
+    const sessionStr = sessionStorage.getItem('giftai_session');
+    let headers = options.headers || {};
+    if (sessionStr) {
+        try {
+            const session = JSON.parse(sessionStr);
+            if (session && session.token) {
+                headers['Authorization'] = `Bearer ${session.token}`;
+            }
+        } catch (e) {
+            console.error("Error loading session token", e);
+        }
+    }
+    
+    const mergedHeaders = {
+        'Content-Type': 'application/json',
+        ...headers
+    };
+    
+    const res = await fetch(url, {
+        ...options,
+        headers: mergedHeaders
+    });
+    
+    if (res.status === 401) {
+        sessionStorage.removeItem('giftai_session');
+        window.dispatchEvent(new CustomEvent('auth-failed'));
+        const errData = await res.json().catch(() => ({}));
+        return { success: false, error: errData.error || 'Session expired. Please log in again.' };
+    }
+    
+    return res.json();
+};
+
 const ApiService = {
     async getOccasions() {
-        return fetch(`${API_BASE}/occasions`).then(r => r.json());
+        return request(`${API_BASE}/occasions`);
     },
     async getTones() {
-        return fetch(`${API_BASE}/tones`).then(r => r.json());
+        return request(`${API_BASE}/tones`);
     },
     async getCustomers() {
-        return fetch(`${API_BASE}/customers`).then(r => r.json());
+        return request(`${API_BASE}/customers`);
     },
     async createCustomer(name, email) {
-        return fetch(`${API_BASE}/customers`, {
+        return request(`${API_BASE}/customers`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, email, phone: "+123-456-7890" })
-        }).then(r => r.json());
+        });
     },
     async getRecipients(queryParams = '') {
-        return fetch(`${API_BASE}/recipients${queryParams}`).then(r => r.json());
+        return request(`${API_BASE}/recipients${queryParams}`);
     },
     async createRecipient(customerId, name, relationship) {
-        return fetch(`${API_BASE}/recipients`, {
+        return request(`${API_BASE}/recipients`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ customer_id: customerId, name, relationship })
-        }).then(r => r.json());
+        });
     },
     async getStats() {
-        return fetch(`${API_BASE}/dashboard/stats`).then(r => r.json());
+        return request(`${API_BASE}/dashboard/stats`);
     },
     async checkConfig() {
-        return fetch(`${API_BASE}/config/check`).then(r => r.json());
+        return request(`${API_BASE}/config/check`);
     },
     async checkHealth() {
-        return fetch(`${API_BASE}/health`).then(r => r.json());
+        return request(`${API_BASE}/health`);
     },
     async generateMessage(payload) {
-        return fetch(`${API_BASE}/messages/generate`, {
+        return request(`${API_BASE}/messages/generate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }).then(r => r.json());
+        });
     },
     async saveMessage(id) {
-        return fetch(`${API_BASE}/messages/${id}/save`, {
+        return request(`${API_BASE}/messages/${id}/save`, {
             method: 'POST'
-        }).then(r => r.json());
+        });
     },
     async linkCard(id) {
-        return fetch(`${API_BASE}/messages/process`, {
+        return request(`${API_BASE}/messages/process`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message_id: id,
                 status: 'linked',
                 gift_order_id: 1,
                 greeting_card_id: 1
             })
-        }).then(r => r.json());
+        });
     },
     async editMessage(id, text) {
-        return fetch(`${API_BASE}/messages/${id}`, {
+        return request(`${API_BASE}/messages/${id}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message_text: text, edited_by: 'customer' })
-        }).then(r => r.json());
+        });
     },
     async getMessages(queryParams = '') {
-        return fetch(`${API_BASE}/messages${queryParams}`).then(r => r.json());
+        return request(`${API_BASE}/messages${queryParams}`);
+    },
+    async login(email, password, isAdmin) {
+        return request(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            body: JSON.stringify({ email, password, isAdmin })
+        });
+    },
+    async register(name, email, password) {
+        return request(`${API_BASE}/auth/register`, {
+            method: 'POST',
+            body: JSON.stringify({ name, email, password })
+        });
+    },
+    async changePassword(oldPassword, newPassword) {
+        return request(`${API_BASE}/auth/change-password`, {
+            method: 'POST',
+            body: JSON.stringify({ old_password: oldPassword, new_password: newPassword })
+        });
     }
 };
 
@@ -183,14 +231,14 @@ function AuthProvider({ children }) {
 
     useEffect(() => {
         // Restore session on mount
-        const session = localStorage.getItem('giftai_session');
+        const session = sessionStorage.getItem('giftai_session');
         if (session) {
             try {
                 const parsed = JSON.parse(session);
                 setCurrentUser(parsed.user);
                 setRole(parsed.role);
             } catch (e) {
-                localStorage.removeItem('giftai_session');
+                sessionStorage.removeItem('giftai_session');
             }
         }
         setLoading(false);
@@ -263,79 +311,42 @@ function AuthProvider({ children }) {
     };
 
     const login = async (email, password, isAdmin) => {
-        if (isAdmin) {
-            if (email === 'admin@giftai.com' && password === 'admin123') {
-                const adminUser = { id: 0, name: 'System Admin', email: 'admin@giftai.com' };
-                setCurrentUser(adminUser);
-                setRole('admin');
-                localStorage.setItem('giftai_session', JSON.stringify({ user: adminUser, role: 'admin' }));
+        try {
+            const res = await ApiService.login(email, password, isAdmin);
+            if (res.success && res.data) {
+                const { user, role, token } = res.data;
+                const userObj = {
+                    ...user,
+                    password_reset_required: res.data.password_reset_required
+                };
+                const sessionObj = { user: userObj, role, token };
+                setCurrentUser(userObj);
+                setRole(role);
+                sessionStorage.setItem('giftai_session', JSON.stringify(sessionObj));
                 return { success: true };
             } else {
-                return { success: false, error: 'Invalid admin email or password.' };
+                return { success: false, error: res.error || 'Invalid credentials' };
             }
-        } else {
-            try {
-                const res = await ApiService.getCustomers();
-                if (res.success && res.data) {
-                    const matched = res.data.find(c => c.email.toLowerCase() === email.toLowerCase());
-                    if (!matched) {
-                        return { success: false, error: 'No profile found with this email. Please register.' };
-                    }
-                    
-                    // Local password check simulation
-                    const passwords = JSON.parse(localStorage.getItem('giftai_user_passwords') || '{}');
-                    const savedPassword = passwords[email.toLowerCase()];
-                    
-                    if (savedPassword !== undefined && savedPassword !== password) {
-                        return { success: false, error: 'Incorrect password.' };
-                    }
-                    
-                    // First-time password setting for pre-existing customers
-                    if (savedPassword === undefined) {
-                        passwords[email.toLowerCase()] = password;
-                        localStorage.setItem('giftai_user_passwords', JSON.stringify(passwords));
-                    }
-
-                    setCurrentUser(matched);
-                    setRole('user');
-                    localStorage.setItem('giftai_session', JSON.stringify({ user: matched, role: 'user' }));
-                    return { success: true };
-                } else {
-                    return { success: false, error: 'Failed to access customers database.' };
-                }
-            } catch (err) {
-                return { success: false, error: 'Failed to connect to backend server.' };
-            }
+        } catch (err) {
+            return { success: false, error: err.message || 'Failed to authenticate.' };
         }
     };
 
     const register = async (name, email, password) => {
         try {
-            // Check if exists
-            const listRes = await ApiService.getCustomers();
-            if (listRes.success && listRes.data) {
-                const matched = listRes.data.find(c => c.email.toLowerCase() === email.toLowerCase());
-                if (matched) {
-                    return { success: false, error: 'Email already registered.' };
-                }
-            }
-
-            const res = await ApiService.createCustomer(name, email);
+            const res = await ApiService.register(name, email, password);
             if (res.success && res.data) {
-                const newUser = res.data;
-                const passwords = JSON.parse(localStorage.getItem('giftai_user_passwords') || '{}');
-                passwords[email.toLowerCase()] = password;
-                localStorage.setItem('giftai_user_passwords', JSON.stringify(passwords));
-
-                setCurrentUser(newUser);
-                setRole('user');
-                localStorage.setItem('giftai_session', JSON.stringify({ user: newUser, role: 'user' }));
+                const { user, role, token } = res.data;
+                const sessionObj = { user, role, token };
+                setCurrentUser(user);
+                setRole(role);
+                sessionStorage.setItem('giftai_session', JSON.stringify(sessionObj));
                 return { success: true };
             } else {
                 return { success: false, error: res.error || 'Failed to register account.' };
             }
         } catch (err) {
-            return { success: false, error: 'Connection failure during registration.' };
+            return { success: false, error: err.message || 'Registration failed.' };
         }
     };
 
@@ -343,14 +354,24 @@ function AuthProvider({ children }) {
         setCurrentUser(null);
         setRole(null);
         setNotifications([]);
-        localStorage.removeItem('giftai_session');
+        sessionStorage.removeItem('giftai_session');
     };
 
+    useEffect(() => {
+        const handleAuthFailed = () => {
+            logout();
+            window.location.hash = '#/login';
+        };
+        window.addEventListener('auth-failed', handleAuthFailed);
+        return () => window.removeEventListener('auth-failed', handleAuthFailed);
+    }, []);
+
     return html`
-        <${AuthContext.Provider} value=${{ currentUser, role, loading, login, register, logout, notifications, addNotification, markAllNotifsRead, clearAllNotifs }}>
+        <${AuthContext.Provider} value=${{ currentUser, setCurrentUser, role, loading, login, register, logout, notifications, addNotification, markAllNotifsRead, clearAllNotifs }}>
             ${children}
         <//>
     `;
+}
 }
 
 // ============================================================
@@ -743,23 +764,28 @@ function AppContent() {
             setOccasions(occRes.data || []);
             setTones(toneRes.data || []);
 
-            let custRes = await ApiService.getCustomers();
-            if (!custRes.data || custRes.data.length === 0) {
-                const seeded = await ApiService.createCustomer("Internship Reviewer", "reviewer@paperplane.com");
-                custRes = { success: true, data: [seeded.data] };
-            }
-
-            // Sync System Admin customer record in database
-            let adminCust = custRes.data.find(c => c.email.toLowerCase() === 'admin@giftai.com');
-            if (!adminCust) {
-                const newAdminCust = await ApiService.createCustomer("System Admin", "admin@giftai.com");
-                if (newAdminCust.success) {
-                    custRes.data.push(newAdminCust.data);
-                    adminCust = newAdminCust.data;
+            let custRes;
+            if (role === 'admin') {
+                custRes = await ApiService.getCustomers();
+                if (!custRes.data || custRes.data.length === 0) {
+                    const seeded = await ApiService.createCustomer("Internship Reviewer", "reviewer@paperplane.com");
+                    custRes = { success: true, data: [seeded.data] };
                 }
-            }
-            if (adminCust && role === 'admin' && currentUser && currentUser.id === 0) {
-                setCurrentUser(prev => ({ ...prev, id: adminCust.id }));
+
+                // Sync System Admin customer record in database
+                let adminCust = custRes.data.find(c => c.email.toLowerCase() === 'admin@giftai.com');
+                if (!adminCust) {
+                    const newAdminCust = await ApiService.createCustomer("System Admin", "admin@giftai.com");
+                    if (newAdminCust.success) {
+                        custRes.data.push(newAdminCust.data);
+                        adminCust = newAdminCust.data;
+                    }
+                }
+                if (adminCust && currentUser && currentUser.id === 0) {
+                    setCurrentUser(prev => ({ ...prev, id: adminCust.id }));
+                }
+            } else {
+                custRes = { success: true, data: currentUser ? [currentUser] : [] };
             }
 
             // Sync workspaceCustomer selection
@@ -770,7 +796,7 @@ function AppContent() {
                     setWorkspaceCustomer('all');
                 }
             } else {
-                if (!workspaceCustomer) {
+                if (!workspaceCustomer && custRes.data && custRes.data.length > 0) {
                     setWorkspaceCustomer(custRes.data[0].id);
                 }
             }
@@ -854,11 +880,107 @@ function AppContent() {
                         <${AnimatePresence}>
                             ${isPaletteOpen && html`<${CommandPalette} onClose=${() => setIsPaletteOpen(false)} />`}
                         </${AnimatePresence}>
+                        <${AnimatePresence}>
+                            ${currentUser && currentUser.password_reset_required && html`<${ForceResetPasswordModal} />`}
+                        </${AnimatePresence}>
                         <${Toast} toast=${toast} setToast=${setToast} />
                     </${HashRouter}>
                 </${GlobalDataContext.Provider}>
             </${ToastContext.Provider}>
         </${ErrorBoundary}>`;
+}
+
+function ForceResetPasswordModal() {
+    const { currentUser, setCurrentUser } = useContext(AuthContext);
+    const { showToast } = useContext(ToastContext);
+    const [newPassword, setNewPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (newPassword.length < 6) {
+            setError('Password must be at least 6 characters.');
+            return;
+        }
+        if (newPassword !== confirmPassword) {
+            setError('Passwords do not match.');
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await ApiService.changePassword(null, newPassword);
+            if (res.success) {
+                showToast("Password updated successfully!");
+                // Update local session
+                const session = JSON.parse(sessionStorage.getItem('giftai_session') || '{}');
+                if (session.user) {
+                    session.user.password_reset_required = false;
+                    sessionStorage.setItem('giftai_session', JSON.stringify(session));
+                }
+                setCurrentUser(prev => ({
+                    ...prev,
+                    password_reset_required: false
+                }));
+            } else {
+                setError(res.error || 'Failed to update password.');
+            }
+        } catch (err) {
+            setError(err.message || 'Error occurred.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return html`
+        <div class="modal-overlay" style=${{ backdropFilter: 'blur(10px)', background: 'rgba(5, 8, 16, 0.85)', zIndex: 10000 }}>
+            <${motion.div} 
+                initial=${{ opacity: 0, y: 50, scale: 0.95 }}
+                animate=${{ opacity: 1, y: 0, scale: 1 }}
+                class="modal-container"
+                style=${{ maxWidth: '450px', width: '90%', border: '1px solid rgba(255, 255, 255, 0.08)' }}
+            >
+                <div class="modal-header">
+                    <h3 class="modal-title">Reset Temporary Password</h3>
+                </div>
+                <div class="modal-body">
+                    <p style=${{ color: 'var(--text-muted)', fontSize: '0.95rem', marginBottom: '1.5rem', lineHeight: '1.5' }}>
+                        For security reasons, you must change your temporary password before accessing the application dashboard.
+                    </p>
+                    <form onSubmit=${handleSubmit}>
+                        ${error && html`<div style=${{ color: 'var(--color-danger)', marginBottom: '1rem', fontSize: '0.85rem' }}>${error}</div>`}
+                        <div class="form-group" style=${{ marginBottom: '1.2rem' }}>
+                            <label class="form-label">New Password</label>
+                            <input 
+                                type="password" 
+                                class="form-input" 
+                                value=${newPassword} 
+                                onInput=${e => setNewPassword(e.target.value)} 
+                                required 
+                                placeholder="Enter at least 6 characters" 
+                            />
+                        </div>
+                        <div class="form-group" style=${{ marginBottom: '1.5rem' }}>
+                            <label class="form-label">Confirm New Password</label>
+                            <input 
+                                type="password" 
+                                class="form-input" 
+                                value=${confirmPassword} 
+                                onInput=${e => setConfirmPassword(e.target.value)} 
+                                required 
+                                placeholder="Confirm your new password" 
+                            />
+                        </div>
+                        <button type="submit" class="btn btn-primary" style=${{ width: '100%' }} disabled=${loading}>
+                            ${loading ? 'Updating...' : 'Update Password & Enter'}
+                        </button>
+                    </form>
+                </div>
+            </${motion.div}>
+        </div>
+    `;
 }
 
 // ============================================================

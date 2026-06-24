@@ -8,7 +8,11 @@ from app.services.recipient_service import create_recipient, get_all_recipients
 
 recipient_bp = Blueprint('recipient_routes', __name__)
 
+from app.utils.auth_helper import token_required
+from flask import g
+
 @recipient_bp.route('/recipients', methods=['POST'])
+@token_required
 def add_recipient():
     """
     POST /api/recipients
@@ -22,9 +26,14 @@ def add_recipient():
         if validation_error:
             return error_response(validation_error, 400)
             
+        # IDOR prevention: non-admins can only create recipients for themselves
+        customer_id = int(data['customer_id'])
+        if g.role != 'admin' and g.user_id != customer_id:
+            return error_response("Access denied. You cannot create recipients for other customers.", 403)
+            
         # 2. Add recipient
         recipient = create_recipient(
-            customer_id=data['customer_id'],
+            customer_id=customer_id,
             name=data['name'],
             relationship=data['relationship'],
             important_date_str=data.get('important_date')
@@ -37,6 +46,7 @@ def add_recipient():
         return error_response(f"An unexpected error occurred: {str(e)}", 500)
 
 @recipient_bp.route('/recipients', methods=['GET'])
+@token_required
 def list_recipients():
     """
     GET /api/recipients
@@ -46,6 +56,10 @@ def list_recipients():
         customer_id_str = request.args.get('customer_id')
         customer_id = int(customer_id_str) if customer_id_str else None
         
+        # IDOR prevention: non-admins can only view their own recipients
+        if g.role != 'admin':
+            customer_id = g.user_id
+            
         recipients = get_all_recipients(customer_id=customer_id)
         return success_response([r.to_dict() for r in recipients])
         
