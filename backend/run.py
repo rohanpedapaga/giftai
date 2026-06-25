@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 from app import create_app
 
 # Load environment variables from .env file
-load_dotenv()
+dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
 
 # Create Flask application instance using the factory
 app = create_app()

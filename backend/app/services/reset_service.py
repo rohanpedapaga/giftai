@@ -36,6 +36,96 @@ def cleanup_expired_otps(user_id=None):
         db.session.rollback()
         print(f"[CLEANUP ERROR] Failed to clean expired OTPs: {str(e)}", flush=True)
 
+def send_otp_email(email, otp):
+    """
+    Sends the 6-digit OTP to the customer's email using the Resend API.
+    Verifies that the API key and Sender Email are loaded from environment variables.
+    Logs HTTP response status and body, and logs any HTTPError or URLError.
+    """
+    api_key = os.getenv("RESEND_API_KEY")
+    from_email = os.getenv("RESEND_FROM_EMAIL")
+
+    # Verify that RESEND_API_KEY and RESEND_FROM_EMAIL are successfully loaded
+    missing_vars = []
+    if not api_key:
+        missing_vars.append("RESEND_API_KEY")
+    if not from_email:
+        missing_vars.append("RESEND_FROM_EMAIL")
+
+    if missing_vars:
+        error_msg = f"[EMAIL ERROR] Missing environment variable(s): {', '.join(missing_vars)}."
+        print(error_msg, flush=True)
+        # Log the generated OTP to the console as a development fallback
+        print("\n" + "="*60, flush=True)
+        print(f"[SECURITY RESET OTP - DEV CONSOLE LOG] Code: {otp} for {email}", flush=True)
+        print("="*60 + "\n", flush=True)
+        return False, error_msg
+
+    print(f"[EMAIL INFO] Executing request to https://api.resend.com/emails to send OTP to {email}...", flush=True)
+
+    subject = "WishForge Password Reset Code"
+    body = f"""Hello,
+
+Your WishForge verification code is:
+
+{otp}
+
+This code expires in 10 minutes.
+
+If you did not request this password reset, simply ignore this email.
+
+Regards,
+WishForge Team"""
+
+    payload = {
+        "from": from_email,
+        "to": [email],
+        "subject": subject,
+        "text": body
+    }
+    
+    url = "https://api.resend.com/emails"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            status_code = response.status
+            response_body = response.read().decode("utf-8")
+            print(f"[RESEND SUCCESS] API HTTP Status Code: {status_code}", flush=True)
+            print(f"[RESEND SUCCESS] API Response Body: {response_body}", flush=True)
+            return True, "Email sent successfully."
+            
+    except urllib.error.HTTPError as e:
+        status_code = e.code
+        try:
+            error_body = e.read().decode("utf-8")
+        except Exception:
+            error_body = "Could not read error response body."
+        error_msg = f"[RESEND HTTPError] Status Code: {status_code} | Reason: {e.reason} | Response: {error_body}"
+        print(error_msg, flush=True)
+        return False, f"Email service is temporarily unavailable. Please try again later."
+        
+    except urllib.error.URLError as e:
+        error_msg = f"[RESEND URLError] Failed to reach server. Reason: {e.reason}"
+        print(error_msg, flush=True)
+        return False, "Email service is temporarily unavailable. Please try again later."
+        
+    except Exception as e:
+        error_msg = f"[RESEND EXCEPTION] Unexpected error occurred: {str(e)}"
+        print(error_msg, flush=True)
+        return False, "Email service is temporarily unavailable. Please try again later."
+
 def generate_and_send_otp(customer):
     """
     Validates rate limits, generates a cryptographically secure 6-digit OTP,
@@ -79,70 +169,13 @@ def generate_and_send_otp(customer):
     db.session.add(otp_record)
     db.session.commit()
 
-    # 7. Check if API key is present
-    api_key = os.getenv("RESEND_API_KEY")
-    is_dev = os.getenv("FLASK_ENV", "development").lower() != "production"
+    # 7. Send the email using send_otp_email helper
+    email_success, email_msg = send_otp_email(customer.email, otp)
+    if not email_success:
+        return False, email_msg
 
-    if not api_key:
-        # Dev console logging
-        print("\n" + "="*60, flush=True)
-        print(f"[SECURITY RESET OTP - DEV CONSOLE LOG] Code: {otp} for {customer.email}", flush=True)
-        print("="*60 + "\n", flush=True)
-        
-        if is_dev:
-            # In development, we return success so developers can test the rest of the flow
-            return True, otp
-        else:
-            return False, "Email service is temporarily unavailable. Please try again later."
+    return True, otp
 
-    # 8. Send raw OTP via Resend API
-    from_email = os.getenv("RESEND_FROM_EMAIL", "WishForge <onboarding@resend.dev>")
-    subject = "WishForge Password Reset Code"
-    body = f"""Hello,
-
-Your WishForge verification code is:
-
-{otp}
-
-This code expires in 10 minutes.
-
-If you did not request this password reset, simply ignore this email.
-
-Regards,
-WishForge Team"""
-
-    payload = {
-        "from": from_email,
-        "to": [customer.email],
-        "subject": subject,
-        "text": body
-    }
-    
-    url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST"
-    )
-    
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            response.read() # Read response body
-            # If in dev mode, we still log it for convenience
-            if is_dev:
-                print(f"[DEV DEBUG] Raw OTP emailed: {otp} for {customer.email}", flush=True)
-            return True, otp
-    except Exception as e:
-        print(f"[RESEND EXCEPTION] Email sending failed: {str(e)}", flush=True)
-        # Log temp OTP to console so developers don't get locked out by transient Resend issues
-        print(f"[DEV DEBUG FALLBACK] Transient email fail. Code: {otp} for {customer.email}", flush=True)
-        return False, "Email service is temporarily unavailable. Please try again later."
 
 def verify_otp_record(email, otp_val):
     """
