@@ -403,7 +403,7 @@ function AuthProvider({ children }) {
 // ============================================================
 // ROUTE PROTECTION WRAPPER
 // ============================================================
-function ProtectedRoute({ children, adminOnly = false }) {
+function ProtectedRoute({ children, adminOnly = false, userOnly = false }) {
     const { currentUser, role, loading } = useContext(AuthContext);
     const navigate = useNavigate();
     const location = useLocation();
@@ -414,6 +414,8 @@ function ProtectedRoute({ children, adminOnly = false }) {
                 navigate('/login', { replace: true, state: { from: location } });
             } else if (adminOnly && role !== 'admin') {
                 navigate('/dashboard', { replace: true });
+            } else if (userOnly && role === 'admin') {
+                navigate('/admin', { replace: true });
             }
         }
     }, [currentUser, role, loading, navigate, location]);
@@ -426,7 +428,7 @@ function ProtectedRoute({ children, adminOnly = false }) {
         `;
     }
 
-    if (!currentUser || (adminOnly && role !== 'admin')) {
+    if (!currentUser || (adminOnly && role !== 'admin') || (userOnly && role === 'admin')) {
         return null;
     }
 
@@ -1427,7 +1429,7 @@ function Layout() {
                 <${Routes}>
                     <${Route} index element=${html`<${IndexRedirect} />`} />
                     <${Route} path="dashboard" element=${html`<${DashboardPage} />`} />
-                    <${Route} path="generate" element=${html`<${GeneratePage} />`} />
+                    <${Route} path="generate" element=${html`<${ProtectedRoute} userOnly=${true}><${GeneratePage} /></${ProtectedRoute}>`} />
                     <${Route} path="requests" element=${html`<${MessageRequestsPage} />`} />
                     <${Route} path="saved" element=${html`<${SavedMessagesPage} />`} />
                     <${Route} path="history" element=${html`<${HistoryPage} />`} />
@@ -1473,7 +1475,6 @@ function Sidebar({ isOpen, onClose }) {
     const adminLinks = [
         { path: '/admin', label: 'Admin Dashboard', icon: 'shield' },
         { path: '/dashboard', label: 'User Dashboard', icon: 'layout-dashboard' },
-        { path: '/generate', label: 'Generate Message', icon: 'wand-2' },
         { path: '/requests', label: 'Message Requests', icon: 'list-todo' },
         { path: '/saved', label: 'Saved Messages', icon: 'bookmark' },
         { path: '/history', label: 'History Log', icon: 'history' },
@@ -1605,9 +1606,11 @@ function Navbar({ onOpenMenu }) {
             </div>
 
             <div class="navbar-right">
-                <button class="mobile-plus-btn" onClick=${() => navigate('/generate')} aria-label="Create new message">
-                    <i data-lucide="plus"></i>
-                </button>
+                ${role !== 'admin' && html`
+                    <button class="mobile-plus-btn" onClick=${() => navigate('/generate')} aria-label="Create new message">
+                        <i data-lucide="plus"></i>
+                    </button>
+                `}
                 <!-- Notifications dropdown -->
                 <div class="notification-dropdown">
                     <button class="nav-icon-btn" onClick=${() => setNotifOpen(!notifOpen)} aria-label="Notifications" aria-expanded=${notifOpen}>
@@ -1659,11 +1662,6 @@ function Navbar({ onOpenMenu }) {
                             <span class="profile-email">${currentUser?.email}</span>
                         </div>
                         <ul class="profile-links">
-                            ${role === 'admin' ? html`
-                                <li><${Link} to="/admin" class="profile-link-item" onClick=${() => setProfileOpen(false)}><i data-lucide="shield"></i>Console<//></li>
-                            ` : null}
-                            <li><${Link} to="/settings" class="profile-link-item" onClick=${() => setProfileOpen(false)}><i data-lucide="settings"></i>Settings<//></li>
-                            <li class="divider"></li>
                             <li><a href="#" class="profile-link-item logout" onClick=${handleLogoutClick}><i data-lucide="log-out"></i>Sign Out</a></li>
                         </ul>
                     </div>
@@ -1686,7 +1684,7 @@ function CommandPalette({ onClose }) {
 
     const baseItems = [
         { label: 'Go to Dashboard', icon: 'layout-dashboard', action: () => navigate('/dashboard') },
-        { label: 'Go to Generate Message', icon: 'wand-2', action: () => navigate('/generate') },
+        ...(role !== 'admin' ? [{ label: 'Go to Generate Message', icon: 'wand-2', action: () => navigate('/generate') }] : []),
         { label: 'Go to Message Requests', icon: 'list-todo', action: () => navigate('/requests') },
         { label: 'Go to Saved Messages', icon: 'bookmark', action: () => navigate('/saved') },
         { label: 'Go to History Log', icon: 'history', action: () => navigate('/history') },
@@ -3419,9 +3417,11 @@ function SavedMessagesPage() {
                                         </button>
                                         ${activeMenuId === msg.id && html`
                                             <div class="mobile-dropdown-menu" onClick=${e => e.stopPropagation()}>
-                                                <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); navigate('/generate', { state: { loadMessage: msg } }); }}>
-                                                    <i data-lucide="external-link"></i> Load Workspace
-                                                </button>
+                                                ${role !== 'admin' && html`
+                                                    <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); navigate('/generate', { state: { loadMessage: msg } }); }}>
+                                                        <i data-lucide="external-link"></i> Load Workspace
+                                                    </button>
+                                                `}
                                                 <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); setEditingId(msg.id); setEditingText(msg.message_text); }}>
                                                     <i data-lucide="edit-3"></i> Edit inline
                                                 </button>
@@ -3451,9 +3451,11 @@ function SavedMessagesPage() {
                                     <span class="badge badge-info">V${msg.version_number || 1}</span>
                                 </div>
                                 <div class="saved-card-desktop-actions">
-                                    <button class="btn-action-icon" onClick=${() => navigate('/generate', { state: { loadMessage: msg } })} title="Load to workspace">
-                                        <i data-lucide="external-link"></i>
-                                    </button>
+                                    ${role !== 'admin' && html`
+                                        <button class="btn-action-icon" onClick=${() => navigate('/generate', { state: { loadMessage: msg } })} title="Load to workspace">
+                                            <i data-lucide="external-link"></i>
+                                        </button>
+                                    `}
                                     <button class="btn-action-icon edit" onClick=${() => { setEditingId(msg.id); setEditingText(msg.message_text); }} title="Edit inline">
                                         <i data-lucide="edit-3"></i>
                                     </button>
