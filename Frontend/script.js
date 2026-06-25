@@ -439,38 +439,31 @@ function ProtectedRoute({ children, adminOnly = false }) {
 // ============================================================
 // WISHFORGE BRAND LOGO (SVG)
 // ============================================================
-function WishForgeLogo({ size = 24 }) {
+function WishForgeLogo({ size = 32 }) {
     return html`
         <svg 
             width=${size} 
             height=${size} 
-            viewBox="0 0 24 24" 
+            viewBox="0 0 32 32" 
             fill="none" 
             xmlns="http://www.w3.org/2000/svg"
-            style=${{ display: 'inline-block', verticalAlign: 'middle' }}
+            style=${{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
         >
-            <!-- Stylized W (ribbon style) -->
-            <path 
-                d="M3 6L7.5 18L11 8.5L14.5 18L19 6" 
-                stroke="url(#wf-logo-grad)" 
-                strokeWidth="2.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
-            />
-            <!-- Sparkle/Magic element in the top right -->
-            <path 
-                d="M18 5.5C18 5.5 19 6 19.5 6C19 6.5 18.5 7 18.5 7C18.5 7 18 6.5 17.5 6.5C18 6 18 5.5 18 5.5Z" 
-                fill="url(#wf-sparkle-grad)" 
-                stroke="none"
-            />
+            <rect width="32" height="32" rx="8" fill="url(#wf-logo-grad)" />
+            <text 
+                x="50%" 
+                y="52%" 
+                text-anchor="middle" 
+                dominant-baseline="central" 
+                fill="#FFFFFF" 
+                style=${{ fontFamily: "var(--font-sans), sans-serif", fontWeight: '800', fontSize: '14px', letterSpacing: '-0.04em' }}
+            >
+                WF
+            </text>
             <defs>
                 <linearGradient id="wf-logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
                     <stop offset="0%" stopColor="#2563EB" />
                     <stop offset="100%" stopColor="#1D4ED8" />
-                </linearGradient>
-                <linearGradient id="wf-sparkle-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#F59E0B" />
-                    <stop offset="100%" stopColor="#D97706" />
                 </linearGradient>
             </defs>
         </svg>
@@ -638,7 +631,7 @@ function AuthPage() {
                 <div class="aurora-glow glow-1"></div>
                 <div class="aurora-glow glow-2"></div>
                 <div class="auth-brand">
-                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${28} /></div>
+                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${32} /></div>
                     <span>Wish<span>Forge</span></span>
                 </div>
                 <h1>AI-powered greetings, thoughtfully crafted.</h1>
@@ -883,7 +876,7 @@ function ForgotPasswordPage() {
                 <div class="aurora-glow glow-1"></div>
                 <div class="aurora-glow glow-2"></div>
                 <div class="auth-brand">
-                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${28} /></div>
+                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${32} /></div>
                     <span>Wish<span>Forge</span></span>
                 </div>
                 <h1>Security & Recovery Portal</h1>
@@ -1404,6 +1397,17 @@ function Layout() {
         if (window.lucide) window.lucide.createIcons();
     }, [location.pathname, isMobileMenuOpen]);
 
+    // Escape key listener to close mobile menu drawer
+    useEffect(() => {
+        const handleEsc = (e) => {
+            if (e.key === 'Escape' && isMobileMenuOpen) {
+                setIsMobileMenuOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [isMobileMenuOpen]);
+
     return html`
         <!-- Left Sidebar -->
         <${Sidebar} isOpen=${isMobileMenuOpen} onClose=${() => setIsMobileMenuOpen(false)} />
@@ -1493,7 +1497,7 @@ function Sidebar({ isOpen, onClose }) {
         <aside class="sidebar ${isOpen ? 'open' : ''} ${isCollapsed ? 'collapsed' : ''}" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo-container">
-                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${24} /></div>
+                    <div class="logo-mark" style=${{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><${WishForgeLogo} size=${32} /></div>
                     <span class="logo-text">Wish<span>Forge</span></span>
                 </div>
                 <button class="sidebar-collapse-toggle" onClick=${() => setIsCollapsed(!isCollapsed)} title=${isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'} style=${{ display: 'inline-flex' }}>
@@ -1540,9 +1544,7 @@ function Sidebar({ isOpen, onClose }) {
                                 onClick=${onClose}
                                 title=${isCollapsed ? link.label : ''}
                             >
-                                <span class="nav-icon-wrapper">
-                                    <i data-lucide=${link.icon}></i>
-                                </span>
+                                <i data-lucide=${link.icon}></i>
                                 <span>${link.label}</span>
                             <//>
                         </li>
@@ -1553,28 +1555,11 @@ function Sidebar({ isOpen, onClose }) {
             <!-- User profile footer widget -->
             <div class="sidebar-footer-profile">
                 <div class="profile-avatar">${getInitials(currentUser?.name)}</div>
-                <div class="profile-info">
-                    <span class="profile-name" title=${currentUser?.name}>${currentUser?.name || 'User'}</span>
-                    <span class="profile-badge">${role || 'user'}</span>
-                </div>
-                <button class="profile-logout-btn" onClick=${handleLogoutClick} title="Sign Out">
-                    <i data-lucide="log-out" style=${{ width: '16px', height: '16px' }}></i>
-                </button>
-            </div>
-
-            <div class="sidebar-footer">
-                <div class="system-status-indicator">
-                    <div class="status-dot-wrapper">
-                        <span class="status-dot-ping"></span>
-                        <span class="status-dot-inner"></span>
+                ${!isCollapsed && html`
+                    <div class="profile-info">
+                        <span class="profile-name" title=${currentUser?.name}>${currentUser?.name || 'User'}</span>
                     </div>
-                    <span class="status-label">System Active</span>
-                </div>
-
-                <button class="theme-quick-toggle" onClick=${() => setTheme(prev => prev === 'light' ? 'dark' : 'light')} aria-label="Toggle theme" title="Toggle Theme">
-                    <i data-lucide="sun" class="sun-icon"></i>
-                    <i data-lucide="moon" class="moon-icon"></i>
-                </button>
+                `}
             </div>
         </aside>
     `;
