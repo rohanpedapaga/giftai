@@ -515,7 +515,7 @@ def generate_message_with_ai(prompt, occasion_name, tone_name, recipient_name, r
     Returns: (message_text, ai_used, debug_info)
     """
     api_key = current_app.config.get('GROQ_API_KEY')
-    
+
     debug_info = {
         "prompt": prompt,
         "raw_response": None,

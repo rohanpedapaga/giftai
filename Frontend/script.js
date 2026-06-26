@@ -773,17 +773,19 @@ function ForgotPasswordPage() {
 
     // OTP Input logic
     const handleOtpChange = (index, val) => {
-        const cleanVal = val.replace(/\D/g, '').slice(0, 1);
+        const cleanVal = val.replace(/\D/g, '');
+        const charToUse = cleanVal.slice(-1);
         const newOtp = [...otpArray];
-        newOtp[index] = cleanVal;
+        newOtp[index] = charToUse;
         setOtpArray(newOtp);
         
         const combinedPin = newOtp.join('');
         setPin(combinedPin);
 
-        if (cleanVal && index < 5) {
+        if (charToUse && index < 5) {
             setTimeout(() => {
                 otpRefs.current[index + 1]?.focus();
+                otpRefs.current[index + 1]?.select();
             }, 0);
         }
     };
@@ -798,32 +800,43 @@ function ForgotPasswordPage() {
                 setOtpArray(newOtp);
                 setPin(newOtp.join(''));
             } else if (index > 0) {
-                // If current is empty, clear previous and focus previous
+                // If current is empty, clear previous, focus previous, and select it
                 newOtp[index - 1] = '';
                 setOtpArray(newOtp);
                 setPin(newOtp.join(''));
                 setTimeout(() => {
                     otpRefs.current[index - 1]?.focus();
+                    otpRefs.current[index - 1]?.select();
                 }, 0);
             }
         } else if (e.key === 'ArrowLeft' && index > 0) {
             e.preventDefault();
             otpRefs.current[index - 1]?.focus();
+            otpRefs.current[index - 1]?.select();
         } else if (e.key === 'ArrowRight' && index < 5) {
             e.preventDefault();
             otpRefs.current[index + 1]?.focus();
+            otpRefs.current[index + 1]?.select();
         }
     };
 
     const handleOtpPaste = (e) => {
         e.preventDefault();
-        const pastedData = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
-        if (pastedData.length === 6) {
-            const newOtp = pastedData.split('');
+        const pastedData = e.clipboardData.getData('text').replace(/\D/g, '');
+        if (pastedData.length > 0) {
+            const digits = pastedData.slice(0, 6).split('');
+            const newOtp = [...otpArray];
+            for (let i = 0; i < 6; i++) {
+                if (i < digits.length) {
+                    newOtp[i] = digits[i];
+                }
+            }
             setOtpArray(newOtp);
-            setPin(pastedData);
+            setPin(newOtp.join(''));
+            const focusIndex = Math.min(digits.length, 5);
             setTimeout(() => {
-                otpRefs.current[5]?.focus();
+                otpRefs.current[focusIndex]?.focus();
+                otpRefs.current[focusIndex]?.select();
             }, 0);
         }
     };
@@ -1049,25 +1062,16 @@ function ForgotPasswordPage() {
                                             onKeyDown=${e => handleOtpKeyDown(index, e)}
                                             onPaste=${handleOtpPaste}
                                             onFocus=${e => e.target.select()}
+                                            onClick=${e => e.target.select()}
                                             ref=${el => otpRefs.current[index] = el}
-                                            style=${{
-                                                width: '44px',
-                                                height: '44px',
-                                                textAlign: 'center',
-                                                fontSize: '1.2rem',
-                                                fontWeight: 'bold',
-                                                background: 'var(--bg-input)',
-                                                border: '1px solid var(--border-color)',
-                                                borderRadius: 'var(--radius-sm)',
-                                                color: 'var(--text-primary)'
-                                            }}
+                                            class="otp-box"
                                             required
                                         />
                                     `)}
                                 </div>
                             </div>
 
-                            <button type="submit" class="btn-primary" style=${{ width: '100%', marginTop: '0.5rem' }} disabled=${loading || countdown <= 0}>
+                            <button type="submit" class="btn-primary" style=${{ width: '100%', marginTop: '0.5rem' }} disabled=${loading || countdown <= 0 || pin.length !== 6}>
                                 <span>${loading ? 'Verifying Code...' : 'Verify Code'}</span>
                                 ${loading && html`<div class="spinner"></div>`}
                             </button>
@@ -1602,6 +1606,7 @@ function Layout() {
                     <${Route} path="saved" element=${html`<${SavedMessagesPage} />`} />
                     <${Route} path="history" element=${html`<${HistoryPage} />`} />
                     <${Route} path="settings" element=${html`<${SettingsPage} />`} />
+                    <${Route} path="about" element=${html`<${AboutPage} />`} />
                     <${Route} path="admin" element=${html`<${ProtectedRoute} adminOnly=${true}><${AdminPage} /></${ProtectedRoute}>`} />
                 </${Routes}>
             </main>
@@ -1637,7 +1642,8 @@ function Sidebar({ isOpen, onClose }) {
         { path: '/requests', label: 'Message Requests', icon: 'list-todo' },
         { path: '/saved', label: 'Saved Messages', icon: 'bookmark' },
         { path: '/history', label: 'History Log', icon: 'history' },
-        { path: '/settings', label: 'Settings', icon: 'settings' }
+        { path: '/settings', label: 'Settings', icon: 'settings' },
+        { path: '/about', label: 'About', icon: 'info' }
     ];
 
     const adminLinks = [
@@ -1646,7 +1652,8 @@ function Sidebar({ isOpen, onClose }) {
         { path: '/requests', label: 'Message Requests', icon: 'list-todo' },
         { path: '/saved', label: 'Saved Messages', icon: 'bookmark' },
         { path: '/history', label: 'History Log', icon: 'history' },
-        { path: '/settings', label: 'Settings', icon: 'settings' }
+        { path: '/settings', label: 'Settings', icon: 'settings' },
+        { path: '/about', label: 'About', icon: 'info' }
     ];
 
     const links = role === 'admin' ? adminLinks : userLinks;
@@ -3118,15 +3125,19 @@ function MessageRequestsPage() {
                     <input type="text" placeholder="Search by recipient or relation..." value=${search} onChange=${e => setSearch(e.target.value)} />
                 </div>
                 <div class="filter-controls">
-                    <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
-                        <option value="">All Occasions</option>
-                        ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
-                    </select>
-                    <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
-                        <option value="">All History</option>
-                        <option value="generated">Generated</option>
-                        <option value="edited">Edited Version</option>
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
+                            <option value="">All Occasions</option>
+                            ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                        </select>
+                    </div>
+                    <div class="glass-select">
+                        <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
+                            <option value="">All History</option>
+                            <option value="generated">Generated</option>
+                            <option value="edited">Edited Version</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -3508,15 +3519,19 @@ function SavedMessagesPage() {
                     <input type="text" placeholder="Search by recipient or relation..." value=${search} onChange=${e => setSearch(e.target.value)} />
                 </div>
                 <div class="filter-controls">
-                    <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
-                        <option value="">All Occasions</option>
-                        ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
-                    </select>
-                    <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
-                        <option value="">All Saved</option>
-                        <option value="saved">Saved Templates</option>
-                        <option value="linked">Linked to Order</option>
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
+                            <option value="">All Occasions</option>
+                            ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                        </select>
+                    </div>
+                    <div class="glass-select">
+                        <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
+                            <option value="">All Saved</option>
+                            <option value="saved">Saved Templates</option>
+                            <option value="linked">Linked to Order</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -3799,30 +3814,38 @@ function HistoryPage() {
                 </div>
                 
                 <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.8rem' }}>
-                    <select value=${filterDate} onChange=${e => { setFilterDate(e.target.value); setPage(1); }}>
-                        <option value="">Any Date Range</option>
-                        <option value="today">Generated Today</option>
-                        <option value="week">Generated This Week</option>
-                        <option value="month">Generated This Month</option>
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterDate} onChange=${e => { setFilterDate(e.target.value); setPage(1); }}>
+                            <option value="">Any Date Range</option>
+                            <option value="today">Generated Today</option>
+                            <option value="week">Generated This Week</option>
+                            <option value="month">Generated This Month</option>
+                        </select>
+                    </div>
 
-                    <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
-                        <option value="">Any Occasion</option>
-                        ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
+                            <option value="">Any Occasion</option>
+                            ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                        </select>
+                    </div>
 
-                    <select value=${filterTone} onChange=${e => { setFilterTone(e.target.value); setPage(1); }}>
-                        <option value="">Any Tone</option>
-                        ${tones.map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterTone} onChange=${e => { setFilterTone(e.target.value); setPage(1); }}>
+                            <option value="">Any Tone</option>
+                            ${tones.map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                        </select>
+                    </div>
 
-                    <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
-                        <option value="">Any Status</option>
-                        <option value="generated">Generated</option>
-                        <option value="saved">Saved</option>
-                        <option value="edited">Draft</option>
-                        <option value="linked">Archived</option>
-                    </select>
+                    <div class="glass-select">
+                        <select value=${filterStatus} onChange=${e => { setFilterStatus(e.target.value); setPage(1); }}>
+                            <option value="">Any Status</option>
+                            <option value="generated">Generated</option>
+                            <option value="saved">Saved</option>
+                            <option value="edited">Draft</option>
+                            <option value="linked">Archived</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -4170,6 +4193,221 @@ function AdminPage() {
                 <div class="logs-console">
                     ${diagnostics ? diagnostics.raw_provider_response : 'Fetching logs...'}
                 </div>
+            </div>
+        </${motion.div}>
+    `;
+}
+
+// ============================================================
+// ABOUT SHOWCASE PAGE VIEW
+// ============================================================
+function AboutPage() {
+    useEffect(() => {
+        if (window.lucide) window.lucide.createIcons();
+    }, []);
+
+    return html`
+        <${motion.div} ...${pageTransition} class="route-wrapper" role="tabpanel">
+            <div class="panel-title-area" style=${{ textAlign: 'center', marginBottom: '3rem' }}>
+                <div style=${{ maxWidth: '720px', margin: '0 auto' }}>
+                    <h1 style=${{ fontSize: '2.5rem', fontWeight: 800, marginBottom: '0.8rem', background: 'linear-gradient(135deg, var(--color-primary), var(--color-secondary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                        About WishForge
+                    </h1>
+                    <p style=${{ fontSize: '1.25rem', color: 'var(--text-main)', fontWeight: 600, marginBottom: '1rem' }}>
+                        AI-powered personalized greeting message generation for every occasion.
+                    </p>
+                    <p style=${{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                        WishForge helps users quickly generate meaningful, personalized greeting messages using Artificial Intelligence. Say goodbye to writer's block and create thoughtful messages that resonate with your loved ones, colleagues, and friends.
+                    </p>
+                </div>
+            </div>
+
+            <div class="settings-section glass-card" style=${{ marginBottom: '2.5rem', padding: '2rem' }}>
+                <div style=${{ display: 'flex', gap: '2rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <div style=${{ flex: '1 1 450px' }}>
+                        <h2 style=${{ fontSize: '1.5rem', marginBottom: '1rem', color: 'var(--color-primary)' }}>
+                            <i data-lucide="info" style=${{ verticalAlign: 'middle', marginRight: '8px' }}></i> Project Overview
+                        </h2>
+                        <p style=${{ color: 'var(--text-main)', lineHeight: '1.6', marginBottom: '1rem' }}>
+                            WishForge is an AI-powered greeting message platform that helps users generate personalized messages for birthdays, anniversaries, festivals, thank-you notes, corporate greetings, and many other occasions.
+                        </p>
+                        <p style=${{ color: 'var(--text-main)', lineHeight: '1.6' }}>
+                            Instead of spending time writing messages manually, users simply provide recipient details, relationship, occasion, tone, and optional context, and AI generates a thoughtful and unique greeting within seconds.
+                        </p>
+                    </div>
+                    <div style=${{ flex: '1 1 300px', display: 'flex', justifyContent: 'center' }}>
+                        <div style=${{ position: 'relative', width: '220px', height: '140px' }}>
+                            <div class="glass-card opaque-card" style=${{ position: 'absolute', width: '100%', height: '100%', top: '-15px', left: '-15px', transform: 'rotate(-6deg)', opacity: 0.5, padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', background: 'var(--bg-app)' }}>
+                                <span style=${{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>ANNIVERSARY</span>
+                                <strong style=${{ fontSize: '0.85rem' }}>Cheers to many more years...</strong>
+                            </div>
+                            <div class="glass-card opaque-card" style=${{ position: 'absolute', width: '100%', height: '100%', top: '0', left: '0', zIndex: 2, padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', boxShadow: 'var(--shadow-lg)', border: '1px solid var(--color-primary)', background: 'var(--bg-app)' }}>
+                                <span style=${{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-primary)' }}>FESTIVAL</span>
+                                <strong style=${{ fontSize: '0.95rem' }}>Wishing you joy & prosperity... 🎉</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div style=${{ marginBottom: '3rem' }}>
+                <h2 style=${{ fontSize: '1.5rem', marginBottom: '1.5rem', textAlign: 'center' }}>
+                    Key Features
+                </h2>
+                <div class="settings-grid" style=${{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(37, 99, 235, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-primary)' }}>
+                                <i data-lucide="wand-2"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>AI-powered Generation</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Generate highly personalized and unique messages utilizing advanced AI models.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-secondary)' }}>
+                                <i data-lucide="calendar"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Multiple Occasions</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Support for birthdays, anniversaries, festivals, corporate milestones, and custom settings.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(34, 211, 238, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-accent)' }}>
+                                <i data-lucide="smile"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Multiple Writing Tones</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Select from various tones ranging from heartfelt, funny, casual, formal, to professional.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(34, 197, 94, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-success)' }}>
+                                <i data-lucide="sliders"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Context Customization</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Feed custom context, prompts, recipient relations, and names to personalize outcomes.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-danger)' }}>
+                                <i data-lucide="bookmark"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Save Favourites</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Save best-performing messages into your curated favorites catalog for instant access.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(245, 158, 11, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-warning)' }}>
+                                <i data-lucide="history"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>History Tracking</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Search and view past generated greetings automatically persisted in your workspace history.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b5cf6' }}>
+                                <i data-lucide="refresh-cw"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Regenerate Messages</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Tweak parameters and hit regenerate to get fresh message variations in real time.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(236, 72, 153, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ec4899' }}>
+                                <i data-lucide="copy"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Copy & Download</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Instantly copy raw output text or download messages as high-quality files.</p>
+                    </div>
+
+                    <div class="settings-section glass-card" style=${{ padding: '1.5rem' }}>
+                        <div style=${{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginBottom: '0.8rem' }}>
+                            <div style=${{ width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(16, 185, 129, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
+                                <i data-lucide="key-round"></i>
+                            </div>
+                            <h3 style=${{ fontSize: '1.1rem', margin: 0 }}>Secure Email OTP</h3>
+                        </div>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Keep your account and workspace credentials protected with email OTP security.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section glass-card" style=${{ marginBottom: '2.5rem', padding: '2rem' }}>
+                <h2 style=${{ fontSize: '1.5rem', marginBottom: '1.5rem', color: 'var(--color-primary)' }}>
+                    <i data-lucide="cpu" style=${{ verticalAlign: 'middle', marginRight: '8px' }}></i> How AI Generation Works
+                </h2>
+                <p style=${{ color: 'var(--text-main)', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+                    WishForge connects users' preferences to state-of-the-art LLMs to produce contextualized responses. Here is a look behind the curtain:
+                </p>
+                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem' }}>
+                    <div style=${{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                        <strong style=${{ color: 'var(--color-secondary)', display: 'block', marginBottom: '0.5rem' }}>1. Structuring Input</strong>
+                        <span style=${{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>The app bundles recipient, occasion, relationship, tone, and prompt variables.</span>
+                    </div>
+                    <div style=${{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                        <strong style=${{ color: 'var(--color-secondary)', display: 'block', marginBottom: '0.5rem' }}>2. Context Construction</strong>
+                        <span style=${{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Our prompt engine enriches variables with structural guidelines to ensure premium outputs.</span>
+                    </div>
+                    <div style=${{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                        <strong style=${{ color: 'var(--color-secondary)', display: 'block', marginBottom: '0.5rem' }}>3. Inference & Safety</strong>
+                        <span style=${{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Groq API models (e.g. Llama 3) process requests and stream/generate responses.</span>
+                    </div>
+                    <div style=${{ background: 'rgba(255, 255, 255, 0.02)', padding: '1rem', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)' }}>
+                        <strong style=${{ color: 'var(--color-secondary)', display: 'block', marginBottom: '0.5rem' }}>4. Post-processing</strong>
+                        <span style=${{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Outputs are rendered, keywords highlighted, and logs saved to database history.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div style=${{ marginBottom: '3rem' }}>
+                <h2 style=${{ fontSize: '1.5rem', marginBottom: '2rem', textAlign: 'center' }}>
+                    How It Works
+                </h2>
+                <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '2rem', position: 'relative' }}>
+                    <div class="glass-card" style=${{ padding: '1.5rem', position: 'relative' }}>
+                        <div style=${{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--border-hover)', position: 'absolute', top: '10px', right: '15px' }}>01</div>
+                        <h3 style=${{ fontSize: '1.1rem', marginBottom: '0.8rem', color: 'var(--color-primary)' }}>Sign In</h3>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Sign in to your private WishForge account to access your workspace preferences.</p>
+                    </div>
+
+                    <div class="glass-card" style=${{ padding: '1.5rem', position: 'relative' }}>
+                        <div style=${{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--border-hover)', position: 'absolute', top: '10px', right: '15px' }}>02</div>
+                        <h3 style=${{ fontSize: '1.1rem', marginBottom: '0.8rem', color: 'var(--color-primary)' }}>Set Parameters</h3>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Specify recipient details, choose from pre-defined occasions & tones, and append custom context.</p>
+                    </div>
+
+                    <div class="glass-card" style=${{ padding: '1.5rem', position: 'relative' }}>
+                        <div style=${{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--border-hover)', position: 'absolute', top: '10px', right: '15px' }}>03</div>
+                        <h3 style=${{ fontSize: '1.1rem', marginBottom: '0.8rem', color: 'var(--color-primary)' }}>AI Synthesis</h3>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>WishForge's prompt orchestration engine queries the AI to write your message.</p>
+                    </div>
+
+                    <div class="glass-card" style=${{ padding: '1.5rem', position: 'relative' }}>
+                        <div style=${{ fontSize: '2.5rem', fontWeight: 900, color: 'var(--border-hover)', position: 'absolute', top: '10px', right: '15px' }}>04</div>
+                        <h3 style=${{ fontSize: '1.1rem', marginBottom: '0.8rem', color: 'var(--color-primary)' }}>Save & Share</h3>
+                        <p style=${{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: '1.5' }}>Instantly copy the message, save to your Favorites collection, or export as text files.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div style=${{ borderTop: '1px solid var(--border-color)', paddingTop: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <strong style=${{ color: 'var(--text-main)', fontSize: '1.2rem', display: 'block', marginBottom: '0.3rem' }}>WishForge</strong>
+                <p style=${{ fontSize: '0.9rem', fontStyle: 'italic', marginBottom: '0.5rem' }}>"Crafting thoughtful messages with the power of Artificial Intelligence."</p>
             </div>
         </${motion.div}>
     `;

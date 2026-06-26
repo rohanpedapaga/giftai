@@ -174,7 +174,7 @@ def forgot_password():
     POST /api/auth/forgot-password
     Step 1 of password recovery. Checks if email is registered,
     enforces cooldown/rate limits, generates secure OTP, hashes it,
-    stores it, and sends the raw OTP via Resend.
+    stores it, and sends the raw OTP via Brevo.
     """
     try:
         from app.services.reset_service import generate_and_send_otp
@@ -195,7 +195,7 @@ def forgot_password():
                 "message": "If an account exists for this email, a verification code has been sent."
             })
             
-        # 2. Generate and send OTP (handles DB persistence, rate limiting, and Resend delivery)
+        # 2. Generate and send OTP (handles DB persistence, rate limiting, and Brevo delivery)
         success, result = generate_and_send_otp(customer)
         if not success:
             # Check if it was a rate limit/cooldown block (status 429)
@@ -210,6 +210,9 @@ def forgot_password():
             "message": "If an account exists for this email, a verification code has been sent."
         })
     except Exception as e:
+        import traceback
+        print("[AUTH ERROR] Exception in forgot_password route:", flush=True)
+        traceback.print_exc()
         db.session.rollback()
         return error_response("Email service is temporarily unavailable. Please try again later.", 500)
 

@@ -5,17 +5,19 @@
 
 import os
 from dotenv import load_dotenv
-from app import create_app
 
-# Load environment variables from .env file
+# Load environment variables from .env file FIRST
 dotenv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+from app import create_app
 
 
 # Create Flask application instance using the factory
 app = create_app()
 
 from app.models import db
+
 
 with app.app_context():
     db.create_all()

@@ -1,6 +1,6 @@
 # backend/app/services/reset_service.py
 # Reusable reset OTP service.
-# Supports SHA-256 secure hashing, Resend API sending, rate limiting, and database validation.
+# Supports SHA-256 secure hashing, Brevo API sending, rate limiting, and database validation.
 
 import os
 import secrets
@@ -38,35 +38,29 @@ def cleanup_expired_otps(user_id=None):
 
 def send_otp_email(email, otp):
     """
-    Sends the 6-digit OTP to the customer's email using the Resend API.
+    Sends the 6-digit OTP to the customer's email using the Brevo API.
     Verifies that the API key and Sender Email are loaded from environment variables.
     Logs HTTP response status and body, and logs any HTTPError or URLError.
     """
-    # [DEBUG LOG] Entering send_otp_email()
-    print(f"[DEBUG LOG] Entering send_otp_email() for email: {email}", flush=True)
-
-    api_key = os.getenv("RESEND_API_KEY")
-    from_email = os.getenv("RESEND_FROM_EMAIL")
-
-    # [DEBUG LOG] Environment variables loaded
-    print(f"[DEBUG LOG] Environment variables loaded. RESEND_API_KEY: {'present' if api_key else 'missing'}, RESEND_FROM_EMAIL: {from_email}", flush=True)
-
-    # Verify that RESEND_API_KEY and RESEND_FROM_EMAIL are successfully loaded
+    brevo_api_key = os.getenv("BREVO_API_KEY")
+    sender_email = os.getenv("BREVO_SENDER_EMAIL")
+    sender_name = os.getenv("BREVO_SENDER_NAME", "WishForge")
+    
     missing_vars = []
-    if not api_key:
-        missing_vars.append("RESEND_API_KEY")
-    if not from_email:
-        missing_vars.append("RESEND_FROM_EMAIL")
-
+    if not brevo_api_key:
+        missing_vars.append("BREVO_API_KEY")
+    if not sender_email:
+        missing_vars.append("BREVO_SENDER_EMAIL")
+        
     if missing_vars:
-        error_msg = f"[EMAIL ERROR] Missing environment variable(s): {', '.join(missing_vars)}."
+        error_msg = f"[EMAIL ERROR] Missing environment variable(s) for Brevo: {', '.join(missing_vars)}."
         print(error_msg, flush=True)
         return False, error_msg
-
-    print(f"[EMAIL INFO] Executing request to https://api.resend.com/emails to send OTP to {email}...", flush=True)
-
+        
+    print(f"[EMAIL INFO] Executing Brevo request to send OTP to {email}...", flush=True)
+    
     subject = "WishForge Password Reset Code"
-    body = f"""Hello,
+    body_text = f"""Hello,
 
 Your WishForge verification code is:
 
@@ -79,18 +73,34 @@ If you did not request this password reset, simply ignore this email.
 Regards,
 WishForge Team"""
 
+    body_html = f"""<p>Hello,</p>
+<p>Your WishForge verification code is:</p>
+<p><strong>{otp}</strong></p>
+<p>This code expires in 10 minutes.</p>
+<p>If you did not request this password reset, simply ignore this email.</p>
+<p>Regards,<br>WishForge Team</p>"""
+
     payload = {
-        "from": from_email,
-        "to": [email],
+        "sender": {
+            "email": sender_email,
+            "name": sender_name
+        },
+        "to": [
+            {
+                "email": email
+            }
+        ],
         "subject": subject,
-        "text": body
+        "htmlContent": body_html,
+        "textContent": body_text
     }
     
-    url = "https://api.resend.com/emails"
+    url = "https://api.brevo.com/v3/smtp/email"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "api-key": brevo_api_key,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "Accept": "application/json",
+        "User-Agent": "WishForge-App"
     }
     
     req = urllib.request.Request(
@@ -99,56 +109,53 @@ WishForge Team"""
         headers=headers,
         method="POST"
     )
-
-    # [DEBUG LOG] HTTP request created
-    print(f"[DEBUG LOG] HTTP request created. URL: {url}, Method: POST, Headers: {list(headers.keys())}", flush=True)
-
+    
     try:
-        # [DEBUG LOG] Request sent
-        print("[DEBUG LOG] Sending HTTP request to Resend API...", flush=True)
         with urllib.request.urlopen(req, timeout=10) as response:
             status_code = response.status
-            # [DEBUG LOG] Response status received
-            print(f"[DEBUG LOG] Response status received: {status_code}", flush=True)
-            
             response_body = response.read().decode("utf-8")
-            # [DEBUG LOG] Response body received
-            print(f"[DEBUG LOG] Response body received: {response_body}", flush=True)
-            
-            print(f"[RESEND SUCCESS] API HTTP Status Code: {status_code}", flush=True)
-            print(f"[RESEND SUCCESS] API Response Body: {response_body}", flush=True)
+            print(f"[EMAIL SUCCESS] Brevo HTTP {status_code}", flush=True)
             return True, "Email sent successfully."
             
     except urllib.error.HTTPError as e:
-        # [DEBUG LOG] Any exception raised
-        print(f"[DEBUG LOG] Exception raised during email sending (HTTPError): {str(e)}", flush=True)
+        import traceback
+        print("[EMAIL ERROR] Brevo HTTPError traceback during email sending:", flush=True)
+        traceback.print_exc()
         status_code = e.code
         try:
             error_body = e.read().decode("utf-8")
+            error_json = json.loads(error_body)
+            brevo_message = error_json.get("message", error_body)
         except Exception:
             error_body = "Could not read error response body."
-        error_msg = f"[RESEND HTTPError] Status Code: {status_code} | Reason: {e.reason} | Response: {error_body}"
-        print(error_msg, flush=True)
-        return False, f"Email service is temporarily unavailable. Please try again later."
+            brevo_message = error_body
+        
+        error_msg = f"Brevo API HTTP Error {status_code}: {brevo_message}"
+        print(f"[BREVO HTTPError] {error_msg}", flush=True)
+        return False, error_msg
         
     except urllib.error.URLError as e:
-        # [DEBUG LOG] Any exception raised
-        print(f"[DEBUG LOG] Exception raised during email sending (URLError): {str(e)}", flush=True)
-        error_msg = f"[RESEND URLError] Failed to reach server. Reason: {e.reason}"
-        print(error_msg, flush=True)
-        return False, "Email service is temporarily unavailable. Please try again later."
+        import traceback
+        print("[EMAIL ERROR] Brevo URLError traceback during email sending:", flush=True)
+        traceback.print_exc()
+        error_msg = f"Brevo API Connection Error: {e.reason}"
+        print(f"[BREVO URLError] {error_msg}", flush=True)
+        return False, error_msg
         
     except Exception as e:
-        # [DEBUG LOG] Any exception raised
-        print(f"[DEBUG LOG] Exception raised during email sending (General): {str(e)}", flush=True)
-        error_msg = f"[RESEND EXCEPTION] Unexpected error occurred: {str(e)}"
-        print(error_msg, flush=True)
-        return False, "Email service is temporarily unavailable. Please try again later."
+        import traceback
+        print("[EMAIL ERROR] Brevo Unexpected Exception traceback during email sending:", flush=True)
+        traceback.print_exc()
+        error_msg = f"Unexpected Email Service Error: {str(e)}"
+        print(f"[BREVO EXCEPTION] {error_msg}", flush=True)
+        return False, error_msg
+
+
 
 def generate_and_send_otp(customer):
     """
     Validates rate limits, generates a cryptographically secure 6-digit OTP,
-    hashes it, stores it, and sends the raw OTP via Resend.
+    hashes it, stores it, and sends the raw OTP via Brevo.
     """
     now = datetime.utcnow()
 
@@ -190,9 +197,6 @@ def generate_and_send_otp(customer):
     otp = ''.join(secrets.choice(string.digits) for _ in range(6))
     hashed_otp = hash_otp(otp)
 
-    # [DEBUG LOG] OTP generated
-    print("[DEBUG LOG] OTP generated successfully.", flush=True)
-
     # 6. Save OTP record to database
     otp_record = OTPVerification(
         user_id=customer.id,
@@ -202,15 +206,13 @@ def generate_and_send_otp(customer):
     db.session.add(otp_record)
     db.session.commit()
 
-    # [DEBUG LOG] OTP stored successfully
-    print("[DEBUG LOG] OTP stored successfully in database.", flush=True)
-
     # 7. Send the email using send_otp_email helper
     email_success, email_msg = send_otp_email(customer.email, otp)
     if not email_success:
         return False, email_msg
 
     return True, otp
+
 
 
 
