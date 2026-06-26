@@ -24,15 +24,51 @@ env/
 *.njsproj
 *.sln
 *.swp
+*.user
 
 # Application Configuration & Secrets
 backend/.env
 .env
 migration_passwords.md
 user_passwords.json
+*.env.*.local
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database backups & SQLite files
 backend/database/database.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.sql.bak
+*.sql.gz
+*.sql.tar
 
 # OS files
+.DS_Store
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+
+# Node modules & packaging
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Logs
+*.log
+logs/
+
+# Temporary, crash and backup files
+*.bak
+*.tmp
+*.temp
+*.swp
+*~
+.crash
+*.dmp
+

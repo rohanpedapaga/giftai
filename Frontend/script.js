@@ -118,6 +118,12 @@ const ApiService = {
             method: 'POST'
         });
     },
+    async toggleFavorite(id, isFavorite) {
+        return request(`${API_BASE}/messages/${id}/favorite`, {
+            method: 'POST',
+            body: JSON.stringify({ is_favorite: isFavorite })
+        });
+    },
     async linkCard(id) {
         return request(`${API_BASE}/messages/process`, {
             method: 'POST',
@@ -694,7 +700,7 @@ function AuthPage() {
                                     <input type="checkbox" checked=${rememberMe} onChange=${e => setRememberMe(e.target.checked)} disabled=${authLoading} />
                                     Remember Me
                                 </label>
-                                <a href="#" onClick=${(e) => { e.preventDefault(); if (!authLoading) navigate('/forgot-password'); }}>Forgot Password?</a>
+                                ${!isAdminLogin && html`<a href="#" onClick=${(e) => { e.preventDefault(); if (!authLoading) navigate('/forgot-password'); }}>Forgot Password?</a>`}
                             </div>
                         `}
 
@@ -1233,21 +1239,32 @@ function AppContent() {
 
     // Load static bootstrap lists
     const loadStaticData = async () => {
+        const fetchWithRetry = async (fn, retries = 10, delay = 2000) => {
+            try {
+                return await fn();
+            } catch (err) {
+                if (retries <= 1) throw err;
+                console.warn(`Static data fetch failed, retrying in ${delay}ms... (${retries - 1} retries left)`);
+                await new Promise(r => setTimeout(r, delay));
+                return fetchWithRetry(fn, retries - 1, delay);
+            }
+        };
+
         try {
             const [occRes, toneRes] = await Promise.all([
-                ApiService.getOccasions(),
-                ApiService.getTones()
+                fetchWithRetry(() => ApiService.getOccasions()),
+                fetchWithRetry(() => ApiService.getTones())
             ]);
 
             setOccasions(occRes.data || []);
             setTones(toneRes.data || []);
 
-            const statsRes = await ApiService.getStats().catch(() => ({ success: false }));
+            const statsRes = await fetchWithRetry(() => ApiService.getStats(), 5, 1000).catch(() => ({ success: false }));
             if (statsRes.success) setStats(statsRes.data);
 
             let custData = [];
             if (role === 'admin') {
-                const custRes = await ApiService.getCustomers();
+                const custRes = await fetchWithRetry(() => ApiService.getCustomers());
                 let list = custRes.data || [];
                 if (list.length === 0) {
                     const seeded = await ApiService.createCustomer("Internship Reviewer", "reviewer@paperplane.com");
@@ -1611,6 +1628,7 @@ function Layout() {
                     <${Route} path="generate" element=${html`<${ProtectedRoute} userOnly=${true}><${GeneratePage} /></${ProtectedRoute}>`} />
                     <${Route} path="requests" element=${html`<${MessageRequestsPage} />`} />
                     <${Route} path="saved" element=${html`<${SavedMessagesPage} />`} />
+                    <${Route} path="favorites" element=${html`<${FavoritesPage} />`} />
                     <${Route} path="history" element=${html`<${HistoryPage} />`} />
                     <${Route} path="settings" element=${html`<${SettingsPage} />`} />
                     <${Route} path="about" element=${html`<${AboutPage} />`} />
@@ -1648,6 +1666,7 @@ function Sidebar({ isOpen, onClose }) {
         { path: '/generate', label: 'Generate Message', icon: 'wand-2' },
         { path: '/requests', label: 'Message Requests', icon: 'list-todo' },
         { path: '/saved', label: 'Saved Messages', icon: 'bookmark' },
+        { path: '/favorites', label: 'Favorites', icon: 'heart' },
         { path: '/history', label: 'History Log', icon: 'history' },
         { path: '/settings', label: 'Settings', icon: 'settings' },
         { path: '/about', label: 'About', icon: 'info' }
@@ -1658,6 +1677,7 @@ function Sidebar({ isOpen, onClose }) {
         { path: '/dashboard', label: 'User Dashboard', icon: 'layout-dashboard' },
         { path: '/requests', label: 'Message Requests', icon: 'list-todo' },
         { path: '/saved', label: 'Saved Messages', icon: 'bookmark' },
+        { path: '/favorites', label: 'Favorites', icon: 'heart' },
         { path: '/history', label: 'History Log', icon: 'history' },
         { path: '/settings', label: 'Settings', icon: 'settings' },
         { path: '/about', label: 'About', icon: 'info' }
@@ -2440,6 +2460,13 @@ function GeneratePage() {
     const [editText, setEditText] = useState('');
     const [isFav, setIsFav] = useState(false);
     
+    const progressIntervalRef = useRef(null);
+    useEffect(() => {
+        return () => {
+            if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+        };
+    }, []);
+    
     // Festival Pop-up States
     const [showFestivalPopup, setShowFestivalPopup] = useState(false);
     const [festivalName, setFestivalName] = useState('');
@@ -2496,19 +2523,41 @@ function GeneratePage() {
         }
     }, [recipient]);
 
-    const runLoadingProgress = async () => {
+    const startLoadingProgress = () => {
+        if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
         setProgress(0);
         setActiveStep(1);
-        const steps = 5;
-        for (let i = 1; i <= steps; i++) {
-            setActiveStep(i);
-            const start = Math.floor(((i - 1) / steps) * 100);
-            const end = Math.floor((i / steps) * 100);
-            for (let p = start; p <= end; p += 5) {
-                setProgress(p);
-                await new Promise(r => setTimeout(r, 35));
+        
+        let p = 0;
+        progressIntervalRef.current = setInterval(() => {
+            p += Math.floor(Math.random() * 3) + 1;
+            if (p >= 95) {
+                p = 95;
+                clearInterval(progressIntervalRef.current);
             }
+            setProgress(p);
+            
+            if (p < 20) {
+                setActiveStep(1);
+            } else if (p < 45) {
+                setActiveStep(2);
+            } else if (p < 70) {
+                setActiveStep(3);
+            } else if (p < 90) {
+                setActiveStep(4);
+            } else {
+                setActiveStep(5);
+            }
+        }, 120);
+    };
+
+    const completeLoadingProgress = async () => {
+        if (progressIntervalRef.current) {
+            clearInterval(progressIntervalRef.current);
         }
+        setProgress(100);
+        setActiveStep(5);
+        await new Promise(r => setTimeout(r, 200));
     };
 
     const handleGenerate = async (e) => {
@@ -2561,16 +2610,33 @@ function GeneratePage() {
             extra_note: note
         };
 
-        const stepsPromise = runLoadingProgress();
+        startLoadingProgress();
 
         let apiResponse = null;
-        try {
-            apiResponse = await ApiService.generateMessage(payload);
-        } catch (err) {
-            console.error(err);
+        let attempts = 0;
+        const maxAttempts = 3;
+        while (attempts < maxAttempts) {
+            attempts++;
+            try {
+                apiResponse = await ApiService.generateMessage(payload);
+                if (apiResponse && apiResponse.success) {
+                    break;
+                }
+                if (attempts < maxAttempts) {
+                    const isQuota = apiResponse && ((apiResponse.error && apiResponse.error.toLowerCase().includes("quota")) || apiResponse.status === 429);
+                    const backoffTime = isQuota ? 2000 : 1000;
+                    console.warn(`AI generation failed, retrying in ${backoffTime}ms... (attempt ${attempts} of ${maxAttempts})`);
+                    await new Promise(resolve => setTimeout(resolve, backoffTime));
+                }
+            } catch (err) {
+                console.error(`AI generation failure:`, err);
+                if (attempts < maxAttempts) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
         }
 
-        await stepsPromise;
+        await completeLoadingProgress();
 
         if (apiResponse && apiResponse.success) {
             const data = apiResponse.data;
@@ -2641,31 +2707,31 @@ function GeneratePage() {
         }
     };
 
-    const handleFavToggle = () => {
+    const handleFavToggle = async () => {
         if (!generatedMsg) return;
         const favs = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
         const idx = favs.indexOf(generatedMsg.id);
-        if (idx === -1) {
-            favs.push(generatedMsg.id);
+        const shouldBeFav = idx === -1;
+        let newFavs;
+        if (shouldBeFav) {
+            newFavs = [...favs, generatedMsg.id];
             setIsFav(true);
             showToast("Added to Favorites ❤️");
             logActivity('favorite', `Message for ${generatedMsg.recipient_name} favorited`);
         } else {
-            favs.splice(idx, 1);
+            newFavs = favs.filter(fid => fid !== generatedMsg.id);
             setIsFav(false);
             showToast("Removed from Favorites");
             logActivity('unfavorite', `Message for ${generatedMsg.recipient_name} removed from favorites`);
         }
-        localStorage.setItem('wishforge_fav_messages', JSON.stringify(favs));
-        // Directly patch the SVG after Lucide replaces the <i> element
-        // We do it on next tick so Lucide has already run
+        localStorage.setItem('wishforge_fav_messages', JSON.stringify(newFavs));
+        
         setTimeout(() => {
             const favBtn = document.querySelector('.action-btn.fav-btn');
             if (favBtn) {
                 const svg = favBtn.querySelector('svg');
                 if (svg) {
-                    const newIsFav = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]').includes(generatedMsg.id);
-                    if (newIsFav) {
+                    if (shouldBeFav) {
                         svg.classList.add('fav-active');
                     } else {
                         svg.classList.remove('fav-active');
@@ -2673,6 +2739,15 @@ function GeneratePage() {
                 }
             }
         }, 0);
+
+        try {
+            await ApiService.toggleFavorite(generatedMsg.id, shouldBeFav);
+        } catch (e) {
+            console.error("Favorite sync failed", e);
+            showToast("Failed to sync favorite with server.", true);
+            localStorage.setItem('wishforge_fav_messages', JSON.stringify(favs));
+            setIsFav(!shouldBeFav);
+        }
     };
 
     const handleDownload = () => {
@@ -2721,10 +2796,10 @@ function GeneratePage() {
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label>Relationship</label>
+                                <label>Recipient is my...</label>
                                 <div class="input-with-icon">
                                     <i data-lucide="heart"></i>
-                                    <input type="text" placeholder="e.g. Grandmother, Aunt" value=${relationship} onChange=${e => setRelationship(e.target.value)} required />
+                                    <input type="text" placeholder="e.g. Dad, Mom, Son, Friend, Teacher" value=${relationship} onChange=${e => setRelationship(e.target.value)} required />
                                 </div>
                             </div>
                         </div>
@@ -2734,9 +2809,13 @@ function GeneratePage() {
                                 <label>Occasion</label>
                                 <div class="select-with-icon">
                                     <i data-lucide="calendar"></i>
-                                    <select value=${occasion} onChange=${e => setOccasion(e.target.value)} required>
-                                        <option value="">Select Occasion</option>
-                                        ${(occasions || []).map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                                    <select value=${occasion} onChange=${e => setOccasion(e.target.value)} required disabled=${occasions.length === 0}>
+                                        ${occasions.length === 0 ? html`
+                                            <option value="">Loading occasions...</option>
+                                        ` : html`
+                                            <option value="">Select Occasion</option>
+                                            ${(occasions || []).map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                                        `}
                                     </select>
                                 </div>
                             </div>
@@ -2744,9 +2823,13 @@ function GeneratePage() {
                                 <label>Tone Style</label>
                                 <div class="select-with-icon">
                                     <i data-lucide="message-square"></i>
-                                    <select value=${tone} onChange=${e => setTone(e.target.value)} required>
-                                        <option value="">Select Tone Style</option>
-                                        ${(tones || []).map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                                    <select value=${tone} onChange=${e => setTone(e.target.value)} required disabled=${tones.length === 0}>
+                                        ${tones.length === 0 ? html`
+                                            <option value="">Loading tones...</option>
+                                        ` : html`
+                                            <option value="">Select Tone Style</option>
+                                            ${(tones || []).map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                                        `}
                                     </select>
                                 </div>
                             </div>
@@ -2773,9 +2856,9 @@ function GeneratePage() {
                     <div class="card-glow"></div>
                     <div class="output-header">
                         <h2>AI Response Output</h2>
-                        <div class="ai-status-indicator ${generatedMsg ? (generatedMsg.ai_used ? 'success' : 'warning') : 'neutral'}">
+                        <div class="ai-status-indicator ${generatedMsg ? 'success' : 'neutral'}">
                             <span class="status-dot"></span>
-                            <span class="status-text">${generatedMsg ? (generatedMsg.ai_used ? 'AI Active' : 'Fallback Active') : 'Ready'}</span>
+                            <span class="status-text">${generatedMsg ? 'AI Active' : 'Ready'}</span>
                         </div>
                     </div>
 
@@ -2859,7 +2942,7 @@ function GeneratePage() {
                                         </div>
                                     </div>
                                     <div class="meta-badges">
-                                        <span class="badge ${generatedMsg.ai_used ? 'badge-indigo' : 'badge-warning'}">${generatedMsg.ai_used ? 'AI GENERATED' : 'TEMPLATE DEFAULT'}</span>
+                                        <span class="badge badge-indigo">AI GENERATED</span>
                                         <span class="badge ${generatedMsg.status === 'saved' || generatedMsg.status === 'linked' || generatedMsg.status === 'edited' ? 'badge-emerald' : 'badge-indigo'}">${generatedMsg.status === 'edited' ? 'SAVED' : generatedMsg.status.toUpperCase()}</span>
                                         <span class="badge badge-info">V${generatedMsg.version_number}</span>
                                     </div>
@@ -3347,6 +3430,14 @@ function SavedMessagesPage() {
                     };
                 });
 
+                const dbFavs = list.filter(m => m.is_favorite).map(m => m.id);
+                const currentBatchIds = list.map(m => m.id);
+                const localFavsStorage = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
+                const remainingFavs = localFavsStorage.filter(id => !currentBatchIds.includes(id) || dbFavs.includes(id));
+                const updatedFavs = Array.from(new Set([...remainingFavs, ...dbFavs]));
+                localStorage.setItem('wishforge_fav_messages', JSON.stringify(updatedFavs));
+                setLocalFavs(updatedFavs);
+
                 setMessages(list);
                 setTotal(res.total || 0);
             }
@@ -3419,8 +3510,9 @@ function SavedMessagesPage() {
         const idx = favs.indexOf(id);
         let newFavs;
         const isCurrentlyFav = idx !== -1;
+        const shouldBeFav = !isCurrentlyFav;
 
-        if (!isCurrentlyFav) {
+        if (shouldBeFav) {
             newFavs = [...favs, id];
             showToast("Added to Favorites ❤️");
             logActivity('favorite', `Message for ${recipient} favorited`);
@@ -3436,9 +3528,13 @@ function SavedMessagesPage() {
 
         // Async background synchronization
         try {
-            await new Promise(resolve => setTimeout(resolve, 200));
+            await ApiService.toggleFavorite(id, shouldBeFav);
         } catch (e) {
             console.error("Favorite backend sync failed", e);
+            showToast("Failed to sync favorite with server.", true);
+            // Revert state
+            localStorage.setItem('wishforge_fav_messages', JSON.stringify(favs));
+            setLocalFavs(favs);
         }
     };
 
@@ -3530,9 +3626,13 @@ function SavedMessagesPage() {
                 </div>
                 <div class="filter-controls">
                     <div class="glass-select">
-                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
-                            <option value="">All Occasions</option>
-                            ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }} disabled=${occasions.length === 0}>
+                            ${occasions.length === 0 ? html`
+                                <option value="">Loading occasions...</option>
+                            ` : html`
+                                <option value="">All Occasions</option>
+                                ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                            `}
                         </select>
                     </div>
                     <div class="glass-select">
@@ -3637,7 +3737,7 @@ function SavedMessagesPage() {
                                 <div class="saved-card-badges">
                                     <span class="badge badge-indigo mobile-hide">${msg.occasion_name}</span>
                                     <span class="badge badge-info mobile-hide">${msg.tone_name || 'Warm'}</span>
-                                    <span class="badge badge-indigo">${msg.ai_used !== false ? 'AI GENERATED' : 'TEMPLATE DEFAULT'}</span>
+                                    <span class="badge badge-indigo">AI GENERATED</span>
                                     <span class="badge ${msg.status === 'saved' || (msg.status === 'edited' && !msg.gift_order_id) ? 'badge-emerald' : 'badge-info'}">
                                         ${msg.status === 'saved' || (msg.status === 'edited' && !msg.gift_order_id) ? 'SAVED' : 'LINKED'}
                                     </span>
@@ -3660,6 +3760,371 @@ function SavedMessagesPage() {
                                     </button>
                                     <button class="btn-action-icon" onClick=${() => handleFavToggle(msg.id, msg.recipient_name)} title="Favorite">
                                         <i data-lucide="heart" data-heart="true" class=${isFav ? 'fav-active' : ''}></i>
+                                    </button>
+                                    <button class="btn-action-icon delete" onClick=${() => handleDelete(msg.id, msg.recipient_name)} title="Delete template">
+                                        <i data-lucide="trash-2"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                })}
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination-wrapper">
+                <button class="btn-pagination" disabled=${page === 1} onClick=${() => setPage(p => p - 1)}><i data-lucide="chevron-left"></i> Prev</button>
+                <span class="pagination-info">Page ${page} of ${totalPages}</span>
+                <button class="btn-pagination" disabled=${page >= totalPages} onClick=${() => setPage(p => p + 1)}>Next <i data-lucide="chevron-right"></i></button>
+            </div>
+        </${motion.div}>
+    `;
+}
+
+// ============================================================
+// 4.5. FAVORITES ARCHIVE GRID PAGE
+// ============================================================
+function FavoritesPage() {
+    const { occasions = [], tones = [], recipients = [], workspaceCustomer = 'all' } = useContext(GlobalDataContext) || {};
+    const { showToast } = useContext(ToastContext);
+    const { addNotification, currentUser, role } = useContext(AuthContext);
+    const navigate = useNavigate();
+
+    const [messages, setMessages] = useState([]);
+    const [search, setSearch] = useState('');
+    const [sortOrder, setSortOrder] = useState('newest'); // 'newest' | 'oldest' | 'recipient'
+    const [viewMode, setViewMode] = useState('grid');
+    
+    // Paging
+    const [page, setPage] = useState(1);
+    const [total, setTotal] = useState(0);
+    const [loading, setLoading] = useState(false);
+
+    // Editing State
+    const [editingId, setEditingId] = useState(null);
+    const [editingText, setEditingText] = useState('');
+
+    // Menu State for Mobile 3-Dot Actions Dropdown
+    const [activeMenuId, setActiveMenuId] = useState(null);
+
+    useEffect(() => {
+        const handleOutsideClick = () => setActiveMenuId(null);
+        document.addEventListener('click', handleOutsideClick);
+        return () => document.removeEventListener('click', handleOutsideClick);
+    }, []);
+
+    const fetchFavorites = async () => {
+        if (!currentUser) return;
+        setLoading(true);
+        let q = `?is_favorite=true&page=${page}&limit=6`;
+        if (role === 'admin') {
+            if (workspaceCustomer !== 'all') {
+                q += `&customer_id=${workspaceCustomer}`;
+            }
+        } else {
+            q += `&customer_id=${currentUser.id}`;
+        }
+
+        try {
+            const res = await ApiService.getMessages(q);
+            if (res.success) {
+                let list = res.data || [];
+                const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
+                
+                // Locally filter out deleted cards
+                list = list.filter(m => !deletedIds.includes(m.id));
+
+                // Map names from context lists
+                list = list.map(m => {
+                    const rec = recipients.find(r => r.id === m.recipient_id);
+                    const occ = occasions.find(o => o.id === m.occasion_id);
+                    const t = tones.find(tone => tone.id === m.tone_id);
+                    return {
+                        ...m,
+                        recipient_name: rec ? rec.name : `Recipient #${m.recipient_id}`,
+                        occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
+                        tone_name: t ? t.name : `Tone #${m.tone_id}`
+                    };
+                });
+
+                setMessages(list);
+                setTotal(res.total || 0);
+            }
+        } catch (err) {
+            showToast("Failed to fetch favorite messages.", true);
+        }
+        setLoading(false);
+    };
+
+    useEffect(() => {
+        fetchFavorites();
+    }, [page, workspaceCustomer]);
+
+    // Client-side search and sorting on the paginated page content
+    const processedMessages = useMemo(() => {
+        let result = [...messages];
+        
+        // Search filter
+        if (search.trim()) {
+            const match = search.toLowerCase();
+            result = result.filter(m => 
+                (m.recipient_name && m.recipient_name.toLowerCase().includes(match)) ||
+                (m.relationship && m.relationship.toLowerCase().includes(match)) ||
+                (m.message_text && m.message_text.toLowerCase().includes(match))
+            );
+        }
+
+        // Sorting
+        if (sortOrder === 'newest') {
+            result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        } else if (sortOrder === 'oldest') {
+            result.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        } else if (sortOrder === 'recipient') {
+            result.sort((a, b) => (a.recipient_name || '').localeCompare(b.recipient_name || ''));
+        }
+
+        return result;
+    }, [messages, search, sortOrder]);
+
+    // Lucide Icons auto-instantiation hook
+    useEffect(() => {
+        if (window.lucide) {
+            window.lucide.createIcons();
+        }
+    }, [processedMessages, loading, viewMode, editingId, activeMenuId]);
+
+    const handleCopy = (txt) => {
+        navigator.clipboard.writeText(txt).then(() => showToast("Copied to clipboard!"));
+    };
+
+    const handleFavToggle = async (id, recipient) => {
+        try {
+            const res = await ApiService.toggleFavorite(id, false);
+            if (res.success) {
+                showToast("Removed from Favorites");
+                logActivity('unfavorite', `Message for ${recipient} removed from favorites`);
+                
+                // Update local storage cache as well
+                const favs = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
+                const updatedFavs = favs.filter(fid => fid !== id);
+                localStorage.setItem('wishforge_fav_messages', JSON.stringify(updatedFavs));
+                
+                // Optimistically remove from list
+                setMessages(prev => prev.filter(m => m.id !== id));
+                fetchFavorites();
+            }
+        } catch (e) {
+            showToast("Favorite sync failed.", true);
+        }
+    };
+
+    const handleDownload = (msg) => {
+        const recipientName = (msg.recipient_name || 'Recipient').replace(/[^a-zA-Z0-9]/g, '_');
+        const occasionName = (msg.occasion_name || 'Occasion').replace(/[^a-zA-Z0-9]/g, '_');
+        const dateStr = msg.created_at ? msg.created_at.split('T')[0] : new Date().toISOString().split('T')[0];
+        const filename = `Fav_${recipientName}_${occasionName}_${dateStr}.txt`;
+
+        const blob = new Blob([msg.message_text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Downloaded plain text successfully!");
+    };
+
+    const handleDelete = (id, recipient) => {
+        if (confirm("Are you sure you want to delete this greeting template?")) {
+            const deleted = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
+            deleted.push(id);
+            localStorage.setItem('wishforge_deleted_messages', JSON.stringify(deleted));
+            showToast("Template deleted successfully.");
+            addNotification('alert', 'Template Deleted', `Saved template for ${recipient} has been deleted.`);
+            setMessages(prev => prev.filter(m => m.id !== id));
+            fetchFavorites();
+            logActivity('delete', `Template for ${recipient} deleted`);
+        }
+    };
+
+    const handleEditSave = async (id, recipient) => {
+        if (!editingText.trim()) return;
+        const originalMsg = messages.find(m => m.id === id);
+        const isLinked = originalMsg && (originalMsg.status === 'linked' || !!originalMsg.gift_order_id);
+
+        try {
+            const res = await ApiService.editMessage(id, editingText.trim());
+            if (res.success) {
+                setMessages(prev => prev.map(m => m.id === id ? { ...m, message_text: editingText.trim() } : m));
+                setEditingId(null);
+                showToast("Greeting updated successfully!");
+                addNotification('save', 'Template Updated', `Edits to greeting message for ${recipient} saved.`);
+                logActivity('edit', `Template for ${recipient} edited inline`);
+
+                if (isLinked) {
+                    await ApiService.linkCard(id);
+                } else {
+                    await ApiService.saveMessage(id);
+                }
+                fetchFavorites();
+            }
+        } catch (err) {
+            showToast("Failed to save changes.", true);
+        }
+    };
+
+    const totalPages = Math.max(1, Math.ceil(total / 6));
+
+    return html`
+        <${motion.div} ...${pageTransition} class="route-wrapper" role="tabpanel">
+            <div class="panel-title-area">
+                <div>
+                    <h1>Favorite Greetings</h1>
+                    <p class="panel-subtitle">Manage your handpicked library of saved greeting templates.</p>
+                </div>
+                <div class="view-toggles">
+                    <button class="view-toggle-btn ${viewMode === 'grid' ? 'active' : ''}" onClick=${() => setViewMode('grid')} title="Grid Layout">
+                        <i data-lucide="layout-grid"></i>
+                    </button>
+                    <button class="view-toggle-btn ${viewMode === 'list' ? 'active' : ''}" onClick=${() => setViewMode('list')} title="Table Layout">
+                        <i data-lucide="list"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters-bar glass-card">
+                <div class="search-input-wrapper">
+                    <i data-lucide="search"></i>
+                    <input type="text" placeholder="Search favorites by recipient..." value=${search} onChange=${e => setSearch(e.target.value)} />
+                </div>
+                <div class="filter-controls">
+                    <div class="glass-select">
+                        <select value=${sortOrder} onChange=${e => setSortOrder(e.target.value)}>
+                            <option value="newest">Newest First</option>
+                            <option value="oldest">Oldest First</option>
+                            <option value="recipient">Recipient (A-Z)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Content -->
+            <div class="saved-cards-container ${viewMode === 'grid' ? 'grid-layout' : 'list-layout'}">
+                ${loading ? html`
+                    <div class="shimmer-loader-wrapper">
+                        <div class="shimmer-card"></div>
+                        <div class="shimmer-card"></div>
+                        <div class="shimmer-card"></div>
+                    </div>
+                ` : processedMessages.length === 0 ? html`
+                    <div class="empty-state glass-card">
+                        <div class="empty-icon-circle"><i data-lucide="heart" class="fav-active"></i></div>
+                        <h3>No Favorites Found</h3>
+                        <p>Mark generated greetings with a heart icon to save them here for instant reuse.</p>
+                    </div>
+                ` : processedMessages.map(msg => {
+                    const formattedDate = msg.created_at
+                        ? (() => {
+                            const d = new Date(msg.created_at);
+                            return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                          })()
+                        : 'N/A';
+                    const isEditing = editingId === msg.id;
+
+                    return html`
+                        <div key=${msg.id} class="saved-message-card glass-card" data-msg-id=${msg.id}>
+                            <div class="card-glow"></div>
+                            
+                            <div class="saved-card-main-row">
+                                <div class="profile-avatar">
+                                    ${msg.recipient_name ? msg.recipient_name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2) : 'RC'}
+                                </div>
+                                
+                                <div class="saved-card-content-area">
+                                    <h3 class="saved-card-title">
+                                        To: ${msg.recipient_name} <span class="relation-tag">(${msg.relationship})</span>
+                                    </h3>
+                                    <span class="saved-card-date">${formattedDate}</span>
+                                    
+                                    ${isEditing ? html`
+                                        <div style=${{ marginBottom: '1rem' }}>
+                                            <textarea rows="4" class="edit-textarea" value=${editingText} onChange=${e => setEditingText(e.target.value)} style=${{ width: '100%', padding: '0.5rem', background: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', color: 'var(--text-main)', resize: 'vertical' }}></textarea>
+                                            <div style=${{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', justifyContent: 'flex-end' }}>
+                                                <button class="btn-primary-small" style=${{ background: 'var(--text-muted)' }} onClick=${() => setEditingId(null)}>Cancel</button>
+                                                <button class="btn-primary-small" onClick=${() => handleEditSave(msg.id, msg.recipient_name)}>Update</button>
+                                            </div>
+                                        </div>
+                                    ` : html`
+                                        <p class="saved-card-body">${msg.message_text}</p>
+                                    `}
+                                </div>
+                                
+                                <div class="saved-card-mobile-right">
+                                    <button class="mobile-fav-btn" onClick=${() => handleFavToggle(msg.id, msg.recipient_name)} aria-label="Favorite">
+                                        <i data-lucide="heart" data-heart="true" class="fav-active"></i>
+                                    </button>
+                                    <div class="mobile-menu-dropdown">
+                                        <button class="mobile-menu-trigger" onClick=${(e) => {
+                                            e.stopPropagation();
+                                            setActiveMenuId(activeMenuId === msg.id ? null : msg.id);
+                                        }} aria-label="More options">
+                                            <i data-lucide="more-vertical"></i>
+                                        </button>
+                                        ${activeMenuId === msg.id && html`
+                                            <div class="mobile-dropdown-menu" onClick=${e => e.stopPropagation()}>
+                                                ${role !== 'admin' && html`
+                                                    <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); navigate('/generate', { state: { loadMessage: msg } }); }}>
+                                                        <i data-lucide="external-link"></i> Load Workspace
+                                                    </button>
+                                                `}
+                                                <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); setEditingId(msg.id); setEditingText(msg.message_text); }}>
+                                                    <i data-lucide="edit-3"></i> Edit inline
+                                                </button>
+                                                <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); handleCopy(msg.message_text); }}>
+                                                    <i data-lucide="copy"></i> Copy Text
+                                                </button>
+                                                <button class="dropdown-item" onClick=${() => { setActiveMenuId(null); handleDownload(msg); }}>
+                                                    <i data-lucide="download"></i> Download Text
+                                                </button>
+                                                <button class="dropdown-item delete" onClick=${() => { setActiveMenuId(null); handleDelete(msg.id, msg.recipient_name); }}>
+                                                    <i data-lucide="trash-2"></i> Delete
+                                                </button>
+                                            </div>
+                                        `}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="saved-card-footer">
+                                <div class="saved-card-badges">
+                                    <span class="badge badge-indigo mobile-hide">${msg.occasion_name}</span>
+                                    <span class="badge badge-info mobile-hide">${msg.tone_name || 'Warm'}</span>
+                                    <span class="badge badge-indigo">AI GENERATED</span>
+                                    <span class="badge ${msg.status === 'saved' || (msg.status === 'edited' && !msg.gift_order_id) ? 'badge-emerald' : 'badge-info'}">
+                                        ${msg.status === 'saved' || (msg.status === 'edited' && !msg.gift_order_id) ? 'SAVED' : 'LINKED'}
+                                    </span>
+                                    <span class="badge badge-info">V${msg.version_number || 1}</span>
+                                </div>
+                                <div class="saved-card-desktop-actions">
+                                    ${role !== 'admin' && html`
+                                        <button class="btn-action-icon" onClick=${() => navigate('/generate', { state: { loadMessage: msg } })} title="Load to workspace">
+                                            <i data-lucide="external-link"></i>
+                                        </button>
+                                    `}
+                                    <button class="btn-action-icon edit" onClick=${() => { setEditingId(msg.id); setEditingText(msg.message_text); }} title="Edit inline">
+                                        <i data-lucide="edit-3"></i>
+                                    </button>
+                                    <button class="btn-action-icon" onClick=${() => handleCopy(msg.message_text)} title="Copy text">
+                                        <i data-lucide="copy"></i>
+                                    </button>
+                                    <button class="btn-action-icon" onClick=${() => handleDownload(msg)} title="Download text">
+                                        <i data-lucide="download"></i>
+                                    </button>
+                                    <button class="btn-action-icon is-fav" onClick=${() => handleFavToggle(msg.id, msg.recipient_name)} title="Remove from Favorites">
+                                        <i data-lucide="heart" data-heart="true" class="fav-active"></i>
                                     </button>
                                     <button class="btn-action-icon delete" onClick=${() => handleDelete(msg.id, msg.recipient_name)} title="Delete template">
                                         <i data-lucide="trash-2"></i>
@@ -3843,16 +4308,24 @@ function HistoryPage() {
                     </div>
 
                     <div class="glass-select">
-                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }}>
-                            <option value="">Any Occasion</option>
-                            ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                        <select value=${filterOcc} onChange=${e => { setFilterOcc(e.target.value); setPage(1); }} disabled=${occasions.length === 0}>
+                            ${occasions.length === 0 ? html`
+                                <option value="">Loading occasions...</option>
+                            ` : html`
+                                <option value="">Any Occasion</option>
+                                ${occasions.map(o => html`<option key=${o.id} value=${o.id}>${o.name}</option>`)}
+                            `}
                         </select>
                     </div>
 
                     <div class="glass-select">
-                        <select value=${filterTone} onChange=${e => { setFilterTone(e.target.value); setPage(1); }}>
-                            <option value="">Any Tone</option>
-                            ${tones.map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                        <select value=${filterTone} onChange=${e => { setFilterTone(e.target.value); setPage(1); }} disabled=${tones.length === 0}>
+                            ${tones.length === 0 ? html`
+                                <option value="">Loading tones...</option>
+                            ` : html`
+                                <option value="">Any Tone</option>
+                                ${tones.map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                            `}
                         </select>
                     </div>
 

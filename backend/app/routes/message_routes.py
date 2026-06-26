@@ -279,6 +279,7 @@ def list_messages():
         status = request.args.get('status')
         customer_id_str = request.args.get('customer_id')
         occasion_id_str = request.args.get('occasion_id')
+        is_favorite_str = request.args.get('is_favorite')
         
         page = int(request.args.get('page', 1))
         limit = int(request.args.get('limit', 10))
@@ -291,10 +292,15 @@ def list_messages():
             
         occasion_id = int(occasion_id_str) if occasion_id_str else None
         
+        is_favorite = None
+        if is_favorite_str is not None:
+            is_favorite = is_favorite_str.lower() in ['true', '1', 't']
+        
         messages, total = get_messages(
             status=status,
             customer_id=customer_id,
             occasion_id=occasion_id,
+            is_favorite=is_favorite,
             page=page,
             limit=limit
         )
@@ -404,6 +410,34 @@ def save_generated_message(message_id):
         return success_response(message.to_dict(), 200)
     except ValueError as ve:
         return error_response(str(ve), 404)
+    except Exception as e:
+        return error_response(f"An unexpected error occurred: {str(e)}", 500)
+
+@message_bp.route('/messages/<int:message_id>/favorite', methods=['POST'])
+@token_required
+def toggle_message_favorite(message_id):
+    """
+    POST /api/messages/:id/favorite
+    Toggles the is_favorite status of a message.
+    """
+    try:
+        from app.models import Message, db
+        message = Message.query.get(message_id)
+        if not message:
+            return error_response("Message not found", 404)
+            
+        # IDOR prevention
+        if g.role != 'admin' and message.customer_id != g.user_id:
+            return error_response("Access denied. You cannot modify other customers' messages.", 403)
+            
+        data = request.get_json() or {}
+        if "is_favorite" in data:
+            message.is_favorite = bool(data["is_favorite"])
+        else:
+            message.is_favorite = not message.is_favorite
+            
+        db.session.commit()
+        return success_response(message.to_dict(), 200)
     except Exception as e:
         return error_response(f"An unexpected error occurred: {str(e)}", 500)
 

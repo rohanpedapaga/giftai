@@ -4775,7 +4775,7 @@ label, .form-group label {
     background-color: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
-    z-index: 150;
+    z-index: 90;
 }
 
 /* Mobile Touch Targets for Sidebar Nav Links */
@@ -4881,6 +4881,7 @@ html[data-theme="light"] .opaque-card {
 
 .otp-inputs-row {
     display: flex;
+    flex-wrap: nowrap !important;
     gap: 0.5rem;
     justify-content: center;
     margin: 1.2rem 0;

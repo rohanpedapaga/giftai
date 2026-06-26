@@ -19,6 +19,7 @@ class Message(db.Model):
     gift_order_id = db.Column(db.Integer, nullable=True)
     greeting_card_id = db.Column(db.Integer, nullable=True)
     version_number = db.Column(db.Integer, default=1)
+    is_favorite = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -43,6 +44,7 @@ class Message(db.Model):
             "gift_order_id": self.gift_order_id,
             "greeting_card_id": self.greeting_card_id,
             "version_number": self.version_number,
+            "is_favorite": self.is_favorite,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None
         }

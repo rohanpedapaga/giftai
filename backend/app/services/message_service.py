@@ -92,7 +92,7 @@ def generate_and_save_message(customer_id, recipient_id, occasion_id, tone_id, r
     
     return message, debug_info
 
-def get_messages(status=None, customer_id=None, occasion_id=None, page=1, limit=10):
+def get_messages(status=None, customer_id=None, occasion_id=None, is_favorite=None, page=1, limit=10):
     """
     Queries messages list with optional filters and pagination.
     """
@@ -108,6 +108,8 @@ def get_messages(status=None, customer_id=None, occasion_id=None, page=1, limit=
         query = query.filter_by(customer_id=customer_id)
     if occasion_id:
         query = query.filter_by(occasion_id=occasion_id)
+    if is_favorite is not None:
+        query = query.filter_by(is_favorite=is_favorite)
         
     # Run paginate query
     paginated = query.order_by(Message.created_at.desc()).paginate(
