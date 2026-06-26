@@ -27,7 +27,15 @@ const html = window.htm.bind(React.createElement);
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !window.location.hostname)
     ? 'http://localhost:5000/api'
     : 'https://giftai-backend-kpkw.onrender.com/api';
+
+// Global API Cache for read queries
+const apiCache = new Map();
+const clearApiCache = () => {
+    apiCache.clear();
+};
+
 const request = async (url, options = {}) => {
+    const start = performance.now();
     const sessionStr = sessionStorage.getItem('wishforge_session');
     let headers = options.headers || {};
     if (sessionStr) {
@@ -67,7 +75,10 @@ const request = async (url, options = {}) => {
         };
     }
     
-    return res.json();
+    const data = await res.json();
+    const duration = performance.now() - start;
+    // console.log(`[Perf Log] API call to ${url} took ${duration.toFixed(2)}ms`);
+    return data;
 };
 
 const ApiService = {
@@ -81,6 +92,7 @@ const ApiService = {
         return request(`${API_BASE}/customers`);
     },
     async createCustomer(name, email) {
+        clearApiCache();
         return request(`${API_BASE}/customers`, {
             method: 'POST',
             body: JSON.stringify({ name, email, phone: "+123-456-7890" })
@@ -90,6 +102,7 @@ const ApiService = {
         return request(`${API_BASE}/recipients${queryParams}`);
     },
     async createRecipient(customerId, name, relationship) {
+        clearApiCache();
         return request(`${API_BASE}/recipients`, {
             method: 'POST',
             body: JSON.stringify({ customer_id: customerId, name, relationship })
@@ -108,23 +121,27 @@ const ApiService = {
         return request(`${API_BASE}/diagnostics`);
     },
     async generateMessage(payload) {
+        clearApiCache();
         return request(`${API_BASE}/messages/generate`, {
             method: 'POST',
             body: JSON.stringify(payload)
         });
     },
     async saveMessage(id) {
+        clearApiCache();
         return request(`${API_BASE}/messages/${id}/save`, {
             method: 'POST'
         });
     },
     async toggleFavorite(id, isFavorite) {
+        clearApiCache();
         return request(`${API_BASE}/messages/${id}/favorite`, {
             method: 'POST',
             body: JSON.stringify({ is_favorite: isFavorite })
         });
     },
     async linkCard(id) {
+        clearApiCache();
         return request(`${API_BASE}/messages/process`, {
             method: 'POST',
             body: JSON.stringify({
@@ -136,6 +153,7 @@ const ApiService = {
         });
     },
     async editMessage(id, text) {
+        clearApiCache();
         return request(`${API_BASE}/messages/${id}`, {
             method: 'PUT',
             body: JSON.stringify({ message_text: text, edited_by: 'customer' })
@@ -571,7 +589,7 @@ function AuthPage() {
         setStatusMessage('Authenticating...');
 
         const loginStartTime = performance.now();
-        console.log(`[Perf Log] Login request started at ${loginStartTime.toFixed(2)}ms`);
+        // console.log(`[Perf Log] Login request started at ${loginStartTime.toFixed(2)}ms`);
 
         // Set timers for perceived progress feedback
         const timer500 = setTimeout(() => {
@@ -591,7 +609,7 @@ function AuthPage() {
 
                 if (res.success) {
                     const loginEndTime = performance.now();
-                    console.log(`[Perf Log] Login API resolved in ${(loginEndTime - loginStartTime).toFixed(2)}ms`);
+                    // console.log(`[Perf Log] Login API resolved in ${(loginEndTime - loginStartTime).toFixed(2)}ms`);
                     setStatusMessage('✓ Welcome back!');
                     showToast(isAdminLogin ? "Admin logged in successfully!" : "Logged in successfully!");
                     // Navigate immediately after success
@@ -1205,10 +1223,26 @@ function AppContent() {
     const [workspaceCustomer, setWorkspaceCustomer] = useState('all');
     const [isCollapsed, setIsCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
     
-    const [occasions, setOccasions] = useState([]);
-    const [tones, setTones] = useState([]);
-    const [recipients, setRecipients] = useState([]);
-    const [stats, setStats] = useState(null);
+    const [occasions, setOccasions] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('wishforge_cached_occasions') || '[]');
+        } catch(e) { return []; }
+    });
+    const [tones, setTones] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('wishforge_cached_tones') || '[]');
+        } catch(e) { return []; }
+    });
+    const [recipients, setRecipients] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('wishforge_cached_recipients') || '[]');
+        } catch(e) { return []; }
+    });
+    const [stats, setStats] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('wishforge_cached_stats') || 'null');
+        } catch(e) { return null; }
+    });
     const [isPaletteOpen, setIsPaletteOpen] = useState(false);
 
     // Apply HTML Theme Attribute
@@ -1234,8 +1268,18 @@ function AppContent() {
         setToast({ show: true, message, isError });
     };
 
-    const [staticLoaded, setStaticLoaded] = useState(false);
-    const [customersList, setCustomersList] = useState([]);
+    const [staticLoaded, setStaticLoaded] = useState(() => {
+        try {
+            const occ = localStorage.getItem('wishforge_cached_occasions');
+            const tn = localStorage.getItem('wishforge_cached_tones');
+            return !!(occ && tn);
+        } catch(e) { return false; }
+    });
+    const [customersList, setCustomersList] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem('wishforge_cached_customers') || '[]');
+        } catch(e) { return []; }
+    });
 
     // Load static bootstrap lists
     const loadStaticData = async () => {
@@ -1251,20 +1295,38 @@ function AppContent() {
         };
 
         try {
-            const [occRes, toneRes] = await Promise.all([
+            const promises = [
                 fetchWithRetry(() => ApiService.getOccasions()),
-                fetchWithRetry(() => ApiService.getTones())
-            ]);
+                fetchWithRetry(() => ApiService.getTones()),
+                fetchWithRetry(() => ApiService.getStats(), 5, 1000).catch(() => ({ success: false }))
+            ];
+            
+            if (role === 'admin') {
+                promises.push(fetchWithRetry(() => ApiService.getCustomers()));
+            }
+            
+            const results = await Promise.all(promises);
+            const occRes = results[0];
+            const toneRes = results[1];
+            const statsRes = results[2];
+            const custRes = role === 'admin' ? results[3] : null;
 
-            setOccasions(occRes.data || []);
-            setTones(toneRes.data || []);
+            const occData = occRes.data || [];
+            const toneData = toneRes.data || [];
+            
+            setOccasions(occData);
+            setTones(toneData);
+            
+            if (statsRes.success && statsRes.data) {
+                setStats(statsRes.data);
+                localStorage.setItem('wishforge_cached_stats', JSON.stringify(statsRes.data));
+            }
 
-            const statsRes = await fetchWithRetry(() => ApiService.getStats(), 5, 1000).catch(() => ({ success: false }));
-            if (statsRes.success) setStats(statsRes.data);
+            localStorage.setItem('wishforge_cached_occasions', JSON.stringify(occData));
+            localStorage.setItem('wishforge_cached_tones', JSON.stringify(toneData));
 
             let custData = [];
             if (role === 'admin') {
-                const custRes = await fetchWithRetry(() => ApiService.getCustomers());
                 let list = custRes.data || [];
                 if (list.length === 0) {
                     const seeded = await ApiService.createCustomer("Internship Reviewer", "reviewer@paperplane.com");
@@ -1288,6 +1350,7 @@ function AppContent() {
                 custData = currentUser ? [currentUser] : [];
             }
             setCustomersList(custData);
+            localStorage.setItem('wishforge_cached_customers', JSON.stringify(custData));
             setStaticLoaded(true);
             return custData;
         } catch (err) {
@@ -1327,6 +1390,7 @@ function AppContent() {
                 filteredRecipients = filteredRecipients.filter(r => r && r.customer_id === targetCustId);
             }
             setRecipients(filteredRecipients);
+            localStorage.setItem('wishforge_cached_recipients', JSON.stringify(filteredRecipients));
         } catch (err) {
             console.error("Error loading workspace recipients:", err);
         }
@@ -1999,24 +2063,41 @@ function DashboardPage() {
     const [favCount, setFavCount] = useState(0);
     const [monthCount, setMonthCount] = useState(0);
 
+    // Individual widget loading states
+    const [statsLoading, setStatsLoading] = useState(true);
+    const [messagesLoading, setMessagesLoading] = useState(true);
+    const [diagLoading, setDiagLoading] = useState(true);
+
     const loadDiagnostics = async () => {
+        const cacheKey = 'infra_health';
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            setDiag(cached);
+            setDiagLoading(false);
+        } else {
+            setDiagLoading(true);
+        }
+
         try {
             const health = await ApiService.checkHealth();
+            let newDiag;
             if (health.success) {
-                setDiag({
+                newDiag = {
                     provider: 'Groq Llama-3.3 API',
                     status: 'Healthy',
                     code: '200',
                     reason: 'None'
-                });
+                };
             } else {
-                setDiag({
+                newDiag = {
                     provider: 'Groq Llama-3.3 API',
                     status: 'Fallback Triggered',
                     code: health.last_provider_response_code || '503',
                     reason: health.error || 'Quota Exceeded'
-                });
+                };
             }
+            apiCache.set(cacheKey, newDiag);
+            setDiag(newDiag);
         } catch (err) {
             setDiag({
                 provider: 'Groq API',
@@ -2025,114 +2106,155 @@ function DashboardPage() {
                 reason: 'Failed to connect'
             });
         }
+        setDiagLoading(false);
+    };
+
+    const processWorkspaceStats = (list) => {
+        const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
+        const activeList = list.filter(m => !deletedIds.includes(m.id));
+        
+        // Map names from context lists for activeList
+        const mappedActiveList = activeList.map(m => {
+            const occ = occasions.find(o => o.id === m.occasion_id);
+            const t = tones.find(tone => tone.id === m.tone_id);
+            return {
+                ...m,
+                occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
+                tone_name: t ? t.name : `Tone #${m.tone_id}`
+            };
+        });
+
+        // Calculate local stats breakdowns
+        const occasionMap = {};
+        mappedActiveList.forEach(m => {
+            occasionMap[m.occasion_name] = (occasionMap[m.occasion_name] || 0) + 1;
+        });
+        const localOccStats = Object.keys(occasionMap).map(occ => ({
+            occasion: occ,
+            count: occasionMap[occ]
+        }));
+
+        const toneMap = {};
+        mappedActiveList.forEach(m => {
+            toneMap[m.tone_name] = (toneMap[m.tone_name] || 0) + 1;
+        });
+        const localToneStats = Object.keys(toneMap).map(t => ({
+            tone: t,
+            count: toneMap[t]
+        }));
+
+        const localStatusCounts = {
+            generated: mappedActiveList.filter(m => m.status === 'generated').length,
+            saved: mappedActiveList.filter(m => m.status === 'saved').length,
+            edited: mappedActiveList.filter(m => m.status === 'edited').length,
+            linked: mappedActiveList.filter(m => m.status === 'linked').length
+        };
+
+        const localStatsObj = {
+            total_messages: mappedActiveList.length,
+            messages_today: mappedActiveList.filter(m => {
+                const d = new Date(m.created_at);
+                const today = new Date();
+                return d.toDateString() === today.toDateString();
+            }).length,
+            messages_by_occasion: localOccStats,
+            messages_by_tone: localToneStats,
+            messages_by_status: localStatusCounts
+        };
+        setLocalStats(localStatsObj);
+
+        // Total Count
+        setTotalMessages(mappedActiveList.length);
+        
+        // Saved templates count
+        const saved = mappedActiveList.filter(m => m.status === 'saved' || (m.status === 'edited' && !m.gift_order_id)).length;
+        setSavedCount(saved);
+
+        // Active Requests (Generated drafts)
+        const activeReqs = mappedActiveList.filter(m => m.status === 'generated').length;
+        setActiveRequests(activeReqs);
+
+        // Completed Requests (Saved Templates & Linked Cards)
+        const completedReqs = mappedActiveList.filter(m => m.status === 'saved' || m.status === 'linked' || m.status === 'edited').length;
+        setCompletedRequests(completedReqs);
+
+        // Favorites Count
+        const favs = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
+        const activeFavs = mappedActiveList.filter(m => favs.includes(m.id)).length;
+        setFavCount(activeFavs);
+
+        // Generated This Month
+        const now = new Date();
+        const thisMonthList = mappedActiveList.filter(m => {
+            const d = new Date(m.created_at);
+            return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+        });
+        setMonthCount(thisMonthList.length);
+
+        setRecentMessages(mappedActiveList.slice(0, 4));
     };
 
     const loadCustomerWorkspaceStats = async () => {
         if (!currentUser) return;
-        try {
-            let q = `?limit=200`;
-            if (role === 'admin') {
-                if (workspaceCustomer !== 'all') {
-                    q += `&customer_id=${workspaceCustomer}`;
-                }
-            } else {
-                q += `&customer_id=${currentUser.id}`;
+        let q = `?limit=200`;
+        if (role === 'admin') {
+            if (workspaceCustomer !== 'all') {
+                q += `&customer_id=${workspaceCustomer}`;
             }
+        } else {
+            q += `&customer_id=${currentUser.id}`;
+        }
+        
+        const cacheKey = `dashboard_messages_${q}`;
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            processWorkspaceStats(cached);
+            setMessagesLoading(false);
+        } else {
+            setMessagesLoading(true);
+        }
+
+        try {
             const res = await ApiService.getMessages(q);
             if (res.success && res.data) {
-                const list = res.data;
-                const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
-                const activeList = list.filter(m => !deletedIds.includes(m.id));
-                
-                // Map names from context lists for activeList
-                const mappedActiveList = activeList.map(m => {
-                    const occ = occasions.find(o => o.id === m.occasion_id);
-                    const t = tones.find(tone => tone.id === m.tone_id);
-                    return {
-                        ...m,
-                        occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
-                        tone_name: t ? t.name : `Tone #${m.tone_id}`
-                    };
-                });
-
-                // Calculate local stats breakdowns
-                const occasionMap = {};
-                mappedActiveList.forEach(m => {
-                    occasionMap[m.occasion_name] = (occasionMap[m.occasion_name] || 0) + 1;
-                });
-                const localOccStats = Object.keys(occasionMap).map(occ => ({
-                    occasion: occ,
-                    count: occasionMap[occ]
-                }));
-
-                const toneMap = {};
-                mappedActiveList.forEach(m => {
-                    toneMap[m.tone_name] = (toneMap[m.tone_name] || 0) + 1;
-                });
-                const localToneStats = Object.keys(toneMap).map(t => ({
-                    tone: t,
-                    count: toneMap[t]
-                }));
-
-                const localStatusCounts = {
-                    generated: mappedActiveList.filter(m => m.status === 'generated').length,
-                    saved: mappedActiveList.filter(m => m.status === 'saved').length,
-                    edited: mappedActiveList.filter(m => m.status === 'edited').length,
-                    linked: mappedActiveList.filter(m => m.status === 'linked').length
-                };
-
-                const localStatsObj = {
-                    total_messages: mappedActiveList.length,
-                    messages_today: mappedActiveList.filter(m => {
-                        const d = new Date(m.created_at);
-                        const today = new Date();
-                        return d.toDateString() === today.toDateString();
-                    }).length,
-                    messages_by_occasion: localOccStats,
-                    messages_by_tone: localToneStats,
-                    messages_by_status: localStatusCounts
-                };
-                setLocalStats(localStatsObj);
-
-                // Total Count
-                setTotalMessages(mappedActiveList.length);
-                
-                // Saved templates count
-                const saved = mappedActiveList.filter(m => m.status === 'saved' || (m.status === 'edited' && !m.gift_order_id)).length;
-                setSavedCount(saved);
-
-                // Active Requests (Generated drafts)
-                const activeReqs = mappedActiveList.filter(m => m.status === 'generated').length;
-                setActiveRequests(activeReqs);
-
-                // Completed Requests (Saved Templates & Linked Cards)
-                const completedReqs = mappedActiveList.filter(m => m.status === 'saved' || m.status === 'linked' || m.status === 'edited').length;
-                setCompletedRequests(completedReqs);
-
-                // Favorites Count
-                const favs = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
-                const activeFavs = mappedActiveList.filter(m => favs.includes(m.id)).length;
-                setFavCount(activeFavs);
-
-                // Generated This Month
-                const now = new Date();
-                const thisMonthList = mappedActiveList.filter(m => {
-                    const d = new Date(m.created_at);
-                    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-                });
-                setMonthCount(thisMonthList.length);
-
-                setRecentMessages(mappedActiveList.slice(0, 4));
+                apiCache.set(cacheKey, res.data);
+                processWorkspaceStats(res.data);
             }
         } catch (e) {
             console.error(e);
         }
+        setMessagesLoading(false);
+    };
+
+    const loadStatsWrapper = async () => {
+        const cacheKey = 'global_stats';
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            setStatsLoading(false);
+        } else {
+            setStatsLoading(true);
+        }
+
+        try {
+            await refreshStats();
+        } catch(e) {}
+        setStatsLoading(false);
     };
 
     useEffect(() => {
-        loadDiagnostics();
-        refreshStats();
-        loadCustomerWorkspaceStats();
+        const q = `?limit=200` + (role === 'admin' ? (workspaceCustomer !== 'all' ? `&customer_id=${workspaceCustomer}` : '') : `&customer_id=${currentUser.id}`);
+        setStatsLoading(!apiCache.has('global_stats'));
+        setMessagesLoading(!apiCache.has(`dashboard_messages_${q}`));
+        setDiagLoading(!apiCache.has('infra_health'));
+
+        Promise.all([
+            loadStatsWrapper(),
+            loadCustomerWorkspaceStats(),
+            new Promise(resolve => setTimeout(async () => {
+                await loadDiagnostics();
+                resolve();
+            }, 600))
+        ]);
     }, [workspaceCustomer]);
 
     const handleCopy = (txt) => {
@@ -2146,7 +2268,7 @@ function DashboardPage() {
                     <h1>Dashboard Overview</h1>
                     <p class="panel-subtitle">Review platform analytics reports, message requests metrics, and systems activity logs.</p>
                 </div>
-                <button class="btn-secondary-outline" onClick=${() => { refreshStats(); loadDiagnostics(); loadCustomerWorkspaceStats(); showToast("Refreshing metrics..."); }}>
+                <button class="btn-secondary-outline" onClick=${() => { loadStatsWrapper(); loadDiagnostics(); loadCustomerWorkspaceStats(); showToast("Refreshing metrics..."); }}>
                     <i data-lucide="refresh-cw"></i> Refresh
                 </button>
             </div>
@@ -2160,7 +2282,11 @@ function DashboardPage() {
                         <div class="metric-icon primary"><i data-lucide="wand-2"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${totalMessages}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${totalMessages}</h2>
+                        `}
                         <span class="metric-trend success"><i data-lucide="arrow-up-right"></i> +12% this week</span>
                     </div>
                 <//>
@@ -2172,7 +2298,11 @@ function DashboardPage() {
                         <div class="metric-icon success"><i data-lucide="bookmark"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${savedCount}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${savedCount}</h2>
+                        `}
                         <span class="metric-trend success"><i data-lucide="arrow-up-right"></i> +4 templates</span>
                     </div>
                 <//>
@@ -2184,7 +2314,11 @@ function DashboardPage() {
                         <div class="metric-icon warning"><i data-lucide="hourglass"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${activeRequests}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${activeRequests}</h2>
+                        `}
                         <span class="metric-trend info">Drafts & Draft Gen</span>
                     </div>
                 <//>
@@ -2196,7 +2330,11 @@ function DashboardPage() {
                         <div class="metric-icon info"><i data-lucide="check-circle"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${completedRequests}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${completedRequests}</h2>
+                        `}
                         <span class="metric-trend success">Linked & Locked</span>
                     </div>
                 <//>
@@ -2208,7 +2346,11 @@ function DashboardPage() {
                         <div class="metric-icon danger"><i data-lucide="heart"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${favCount}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${favCount}</h2>
+                        `}
                         <span class="metric-trend info">Starred cards</span>
                     </div>
                 <//>
@@ -2220,7 +2362,11 @@ function DashboardPage() {
                         <div class="metric-icon primary"><i data-lucide="calendar"></i></div>
                     </div>
                     <div class="metric-body">
-                        <h2 class="metric-value">${monthCount}</h2>
+                        ${messagesLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '2.2rem', width: '5rem', marginTop: '0.4rem', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <h2 class="metric-value">${monthCount}</h2>
+                        `}
                         <span class="metric-trend success"><i data-lucide="arrow-up-right"></i> Current month</span>
                     </div>
                 <//>
@@ -2243,18 +2389,22 @@ function DashboardPage() {
                         <i data-lucide="activity" class="diag-pulse" style=${{ width: '16px' }}></i> Infrastructure Status
                     </h3>
                     <div class="diagnostics-grid-single-col">
-                        <div class="diag-item">
-                            <span class="diag-label">Active Provider</span>
-                            <span class="diag-value">${diag.provider}</span>
-                        </div>
-                        <div class="diag-item">
-                            <span class="diag-label">API Connectivity</span>
-                            <span class="diag-value">${diag.status}</span>
-                        </div>
-                        <div class="diag-item">
-                            <span class="diag-label">HTTP response</span>
-                            <span class="diag-value">${diag.code}</span>
-                        </div>
+                        ${diagLoading ? html`
+                            <div class="shimmer-card" style=${{ height: '110px', width: '100%', border: 'none', borderRadius: '4px' }}></div>
+                        ` : html`
+                            <div class="diag-item">
+                                <span class="diag-label">Active Provider</span>
+                                <span class="diag-value">${diag.provider}</span>
+                            </div>
+                            <div class="diag-item">
+                                <span class="diag-label">API Connectivity</span>
+                                <span class="diag-value">${diag.status}</span>
+                            </div>
+                            <div class="diag-item">
+                                <span class="diag-label">HTTP response</span>
+                                <span class="diag-value">${diag.code}</span>
+                            </div>
+                        `}
                     </div>
                 </div>
             </div>
@@ -2335,7 +2485,27 @@ function RecentActivityWidget({ limit = 5 }) {
 
 // Recharts Dashboard reporting component
 function ReportsSection({ stats, recentMessages }) {
-    if (!stats) return html`<div style=${{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>Loading reporting metrics...</div>`;
+    if (!stats) {
+        return html`
+            <div class="charts-grid">
+                <!-- Occasions Bar Chart Skeleton -->
+                <div class="chart-card glass-card" style=${{ padding: '1.5rem', height: '350px', display: 'flex', flexDirection: 'column' }}>
+                    <h3 style=${{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '1rem', color: 'var(--text-main)' }}>
+                        <i data-lucide="bar-chart-2" style=${{ width: '16px', color: 'var(--color-primary)' }}></i> Most Used Occasions
+                    </h3>
+                    <div class="shimmer-card" style=${{ flex: 1, marginTop: '1rem', height: 'auto', border: 'none', opacity: 0.15 }}></div>
+                </div>
+
+                <!-- Tones Pie Chart Skeleton -->
+                <div class="chart-card glass-card" style=${{ padding: '1.5rem', height: '350px', display: 'flex', flexDirection: 'column' }}>
+                    <h3 style=${{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '1rem', color: 'var(--text-main)' }}>
+                        <i data-lucide="pie-chart" style=${{ width: '16px', color: 'var(--color-secondary)' }}></i> Most Used Tones
+                    </h3>
+                    <div class="shimmer-card" style=${{ flex: 1, marginTop: '1rem', height: 'auto', border: 'none', opacity: 0.15 }}></div>
+                </div>
+            </div>
+        `;
+    }
 
     const occasionData = stats.messages_by_occasion || [];
     const toneData = stats.messages_by_tone || [];
@@ -3386,9 +3556,39 @@ function SavedMessagesPage() {
         );
     }, [messages, search]);
 
+    const processSavedData = (list, totalCount) => {
+        const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
+        
+        // Locally filter out deleted cards
+        let filteredList = list.filter(m => !deletedIds.includes(m.id));
+
+        // Map names from context lists
+        filteredList = filteredList.map(m => {
+            const rec = recipients.find(r => r.id === m.recipient_id);
+            const occ = occasions.find(o => o.id === m.occasion_id);
+            const t = tones.find(tone => tone.id === m.tone_id);
+            return {
+                ...m,
+                recipient_name: rec ? rec.name : `Recipient #${m.recipient_id}`,
+                occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
+                tone_name: t ? t.name : `Tone #${m.tone_id}`
+            };
+        });
+
+        const dbFavs = filteredList.filter(m => m.is_favorite).map(m => m.id);
+        const currentBatchIds = filteredList.map(m => m.id);
+        const localFavsStorage = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
+        const remainingFavs = localFavsStorage.filter(id => !currentBatchIds.includes(id) || dbFavs.includes(id));
+        const updatedFavs = Array.from(new Set([...remainingFavs, ...dbFavs]));
+        localStorage.setItem('wishforge_fav_messages', JSON.stringify(updatedFavs));
+        setLocalFavs(updatedFavs);
+
+        setMessages(filteredList);
+        setTotal(totalCount);
+    };
+
     const fetchSaved = async () => {
         if (!currentUser) return;
-        setLoading(true);
         let q = `?page=${page}&limit=6`;
         if (role === 'admin') {
             if (workspaceCustomer !== 'all') {
@@ -3408,38 +3608,20 @@ function SavedMessagesPage() {
             q += `&status=saved,linked,edited`;
         }
 
+        const cacheKey = `saved_messages_${q}`;
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            processSavedData(cached.data, cached.total);
+            setLoading(false);
+        } else {
+            setLoading(true);
+        }
+
         try {
             const res = await ApiService.getMessages(q);
-            if (res.success) {
-                let list = res.data || [];
-                const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
-                
-                // Locally filter out deleted cards
-                list = list.filter(m => !deletedIds.includes(m.id));
-
-                // Map names from context lists
-                list = list.map(m => {
-                    const rec = recipients.find(r => r.id === m.recipient_id);
-                    const occ = occasions.find(o => o.id === m.occasion_id);
-                    const t = tones.find(tone => tone.id === m.tone_id);
-                    return {
-                        ...m,
-                        recipient_name: rec ? rec.name : `Recipient #${m.recipient_id}`,
-                        occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
-                        tone_name: t ? t.name : `Tone #${m.tone_id}`
-                    };
-                });
-
-                const dbFavs = list.filter(m => m.is_favorite).map(m => m.id);
-                const currentBatchIds = list.map(m => m.id);
-                const localFavsStorage = JSON.parse(localStorage.getItem('wishforge_fav_messages') || '[]');
-                const remainingFavs = localFavsStorage.filter(id => !currentBatchIds.includes(id) || dbFavs.includes(id));
-                const updatedFavs = Array.from(new Set([...remainingFavs, ...dbFavs]));
-                localStorage.setItem('wishforge_fav_messages', JSON.stringify(updatedFavs));
-                setLocalFavs(updatedFavs);
-
-                setMessages(list);
-                setTotal(res.total || 0);
+            if (res.success && res.data) {
+                apiCache.set(cacheKey, { data: res.data, total: res.total || 0 });
+                processSavedData(res.data, res.total || 0);
             }
         } catch (err) {
             showToast("Failed to fetch messages list.", true);
@@ -3813,9 +3995,31 @@ function FavoritesPage() {
         return () => document.removeEventListener('click', handleOutsideClick);
     }, []);
 
+    const processFavoritesData = (list, totalCount) => {
+        const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
+        
+        // Locally filter out deleted cards
+        let filteredList = list.filter(m => !deletedIds.includes(m.id));
+
+        // Map names from context lists
+        filteredList = filteredList.map(m => {
+            const rec = recipients.find(r => r.id === m.recipient_id);
+            const occ = occasions.find(o => o.id === m.occasion_id);
+            const t = tones.find(tone => tone.id === m.tone_id);
+            return {
+                ...m,
+                recipient_name: rec ? rec.name : `Recipient #${m.recipient_id}`,
+                occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
+                tone_name: t ? t.name : `Tone #${m.tone_id}`
+            };
+        });
+
+        setMessages(filteredList);
+        setTotal(totalCount);
+    };
+
     const fetchFavorites = async () => {
         if (!currentUser) return;
-        setLoading(true);
         let q = `?is_favorite=true&page=${page}&limit=6`;
         if (role === 'admin') {
             if (workspaceCustomer !== 'all') {
@@ -3825,30 +4029,20 @@ function FavoritesPage() {
             q += `&customer_id=${currentUser.id}`;
         }
 
+        const cacheKey = `favorites_messages_${q}`;
+        const cached = apiCache.get(cacheKey);
+        if (cached) {
+            processFavoritesData(cached.data, cached.total);
+            setLoading(false);
+        } else {
+            setLoading(true);
+        }
+
         try {
             const res = await ApiService.getMessages(q);
-            if (res.success) {
-                let list = res.data || [];
-                const deletedIds = JSON.parse(localStorage.getItem('wishforge_deleted_messages') || '[]');
-                
-                // Locally filter out deleted cards
-                list = list.filter(m => !deletedIds.includes(m.id));
-
-                // Map names from context lists
-                list = list.map(m => {
-                    const rec = recipients.find(r => r.id === m.recipient_id);
-                    const occ = occasions.find(o => o.id === m.occasion_id);
-                    const t = tones.find(tone => tone.id === m.tone_id);
-                    return {
-                        ...m,
-                        recipient_name: rec ? rec.name : `Recipient #${m.recipient_id}`,
-                        occasion_name: occ ? occ.name : `Occasion #${m.occasion_id}`,
-                        tone_name: t ? t.name : `Tone #${m.tone_id}`
-                    };
-                });
-
-                setMessages(list);
-                setTotal(res.total || 0);
+            if (res.success && res.data) {
+                apiCache.set(cacheKey, { data: res.data, total: res.total || 0 });
+                processFavoritesData(res.data, res.total || 0);
             }
         } catch (err) {
             showToast("Failed to fetch favorite messages.", true);
